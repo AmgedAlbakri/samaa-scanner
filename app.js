@@ -15,6 +15,8 @@
 
   // in-memory caches
   var allProducts = [];          // for Products screen + search
+  var barcodeIndex = {};         // barcode -> product, for INSTANT local lookups
+  var productsLoaded = false;
   var sessionScans = [];         // current Scan-screen session (newest first)
   var scanLog = safeParse(localStorage.getItem(KEYS.log)) || []; // persistent
 
@@ -62,6 +64,8 @@
       b.classList.toggle('active', b.dataset.screen === name);
     });
     $('appbar-title').textContent = TITLES[name] || '';
+    // camera only runs on the Scan screen (saves battery / frees the camera)
+    if (name === 'scan') startScanner(); else stopScanner();
     if (name === 'products' && !allProducts.length) loadProducts();
     if (name === 'log') renderLog();
   }
@@ -81,6 +85,9 @@
     $('profile-email').textContent = (user && user.email) || '—';
     showScreen('scan');
     renderLog();
+    // preload the whole catalogue once → instant local scans + ready Products tab,
+    // and it doubles as an immediate session-validity check on open.
+    loadProducts();
   }
 
   function showLogin() {
@@ -143,64 +150,94 @@
     return [F.EAN_13, F.CODE_128, F.EAN_8, F.UPC_A, F.QR_CODE];
   }
 
+  var starting = false;
   function startScanner() {
-    if (scanning) return;
+    if (scanning || starting) return;
     if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); return; }
-    qr = qr || new Html5Qrcode('reader', { formatsToSupport: supportedFormats(), verbose: false });
+    starting = true;
+    qr = qr || new Html5Qrcode('reader', {
+      formatsToSupport: supportedFormats(),
+      // use the phone's built-in barcode detector when available (much faster on Android)
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      verbose: false
+    });
     var cfg = {
-      fps: 10,
-      qrbox: function (w, h) { var m = Math.floor(Math.min(w, h) * 0.7); return { width: m, height: Math.floor(m * 0.6) }; },
-      aspectRatio: 1.0
+      fps: 16,
+      qrbox: function (w, h) { var m = Math.floor(Math.min(w, h) * 0.72); return { width: m, height: Math.floor(m * 0.55) }; },
+      aspectRatio: 1.0,
+      disableFlip: true
     };
     qr.start({ facingMode: 'environment' }, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
-      .then(function () { scanning = true; $('scan-toggle').textContent = 'Stop camera'; })
+      .then(function () {
+        scanning = true; starting = false;
+        $('viewfinder').classList.add('live');
+        $('scan-toggle').textContent = 'Stop camera';
+      })
       .catch(function (err) {
-        toast('Cannot open camera. Allow camera access.', true);
+        starting = false;
+        $('tap-hint').textContent = 'Tap to start the camera';
+        toast('Cannot open camera — allow camera access.', true);
         console.warn('camera start failed', err);
       });
   }
 
   function stopScanner() {
     if (qr && scanning) {
-      try { qr.stop().then(function () { qr.clear(); }).catch(function () {}); } catch (e) {}
+      try { qr.stop().then(function () { try { qr.clear(); } catch (e) {} }).catch(function () {}); } catch (e) {}
     }
     scanning = false;
+    var vf = $('viewfinder'); if (vf) vf.classList.remove('live');
     var t = $('scan-toggle'); if (t) t.textContent = 'Start camera';
   }
 
   $('scan-toggle').addEventListener('click', function () {
     if (scanning) stopScanner(); else startScanner();
   });
+  // tapping the viewfinder also (re)starts the camera — handy if auto-start was blocked
+  $('viewfinder').addEventListener('click', function () { if (!scanning) startScanner(); });
 
   function onScan(decoded) {
     var now = Date.now();
-    // ignore an immediate duplicate of the same code, and respect a global cooldown
-    if (busy) return;
-    if (decoded === lastCode && now - lastAt < 2500) return;
-    if (now - lastAt < CFG.SCAN_COOLDOWN_MS) return;
+    decoded = String(decoded || '').trim();
+    if (busy || !decoded) return;
+    if (decoded === lastCode && now - lastAt < 2500) return;   // ignore immediate repeats
+    if (now - lastAt < CFG.SCAN_COOLDOWN_MS) return;            // global cooldown
     lastCode = decoded; lastAt = now; busy = true;
+    if (navigator.vibrate) { try { navigator.vibrate(55); } catch (e) {} }
 
+    // 1) instant local hit from the preloaded catalogue — no network round-trip
+    var local = barcodeIndex[decoded];
+    if (local) {
+      acceptScan(local, decoded);
+      setTimeout(function () { busy = false; }, CFG.SCAN_COOLDOWN_MS);
+      return;
+    }
+
+    // 2) not cached → ask the server (covers items added since load)
     flashToast('Looking up ' + decoded + '…');
     api('lookup', { barcode: decoded }).then(function (res) {
-      // re-arm after a short cooldown regardless of result (hands-free)
       setTimeout(function () { busy = false; }, CFG.SCAN_COOLDOWN_MS);
       if (handleUnauthorized(res)) return;
-
       if (res && res.found) {
         var p = normalizeProduct(res);
-        var entry = {
-          sku: p.sku, name: p.name, barcode: p.barcode || decoded,
-          image: p.image, price: p.price, at: Date.now()
-        };
-        sessionScans.unshift(entry);
-        renderSession();
-        pushLog(entry);
-        flashToast('✓ ' + p.name);
+        if (p.barcode) barcodeIndex[p.barcode] = p; // cache for next time
+        acceptScan(p, decoded);
       } else {
         flashToast('✗ Not found: ' + decoded);
         openNotFound(decoded);
       }
     });
+  }
+
+  function acceptScan(p, decoded) {
+    var entry = {
+      sku: p.sku, name: p.name, barcode: p.barcode || decoded,
+      image: p.image, price: p.price, at: Date.now()
+    };
+    sessionScans.unshift(entry);
+    renderSession();
+    pushLog(entry);
+    flashToast('✓ ' + p.name);
   }
 
   function flashToast(msg) {
@@ -269,7 +306,8 @@
   }
 
   function openProductByEntry(e) {
-    // we already have enough to render, but re-lookup for the freshest price/image
+    // prefer the instant local cache; only hit the server if it's not there
+    if (e.barcode && barcodeIndex[e.barcode]) { openProduct(barcodeIndex[e.barcode]); return; }
     if (e.barcode) {
       api('lookup', { barcode: e.barcode }).then(function (res) {
         if (handleUnauthorized(res)) return;
@@ -293,6 +331,10 @@
       if (handleUnauthorized(res)) return;
       var list = (res && res.products) || (Array.isArray(res) ? res : []);
       allProducts = list.map(normalizeProduct);
+      productsLoaded = true;
+      // build the instant-lookup index (barcode -> product)
+      barcodeIndex = {};
+      allProducts.forEach(function (p) { if (p.barcode) barcodeIndex[String(p.barcode).trim()] = p; });
       buildChips();
       renderProducts(allProducts);
     });

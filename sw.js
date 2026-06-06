@@ -3,7 +3,7 @@
  * API calls (cross-origin POST to Apps Script) are always network-only —
  * we never cache product/login responses.
  */
-var CACHE = 'samaa-scanner-v1';
+var CACHE = 'samaa-scanner-v2';
 var SHELL = [
   './',
   './index.html',
