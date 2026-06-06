@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#F4F4F5" />
+  <title>SAMAA MAJU Scanner</title>
+
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="brand/apple-touch-icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="SAMAA Scan" />
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Camera scanning (works on iOS Safari + Android Chrome) -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- Barcode preview rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+</head>
+<body>
+
+<!-- ════════════════════════════ LOGIN ════════════════════════════ -->
+<section id="screen-login" class="screen screen-login active">
+  <div class="login-wrap">
+    <img class="login-logo" src="brand/logo-transparent.png" alt="SAMAA MAJU" />
+    <h1 class="login-title">Staff Scanner</h1>
+    <p class="login-sub">Sign in to continue</p>
+    <form id="login-form" autocomplete="on">
+      <input id="login-id" class="input" type="text" inputmode="email"
+             placeholder="Email or username" autocomplete="username" required />
+      <input id="login-pw" class="input" type="password"
+             placeholder="Password" autocomplete="current-password" required />
+      <div id="login-error" class="form-error" hidden></div>
+      <button id="login-btn" class="btn-primary" type="submit">Log in</button>
+    </form>
+  </div>
+</section>
+
+<!-- ════════════════════════════ APP ════════════════════════════ -->
+<div id="app" class="app" hidden>
+
+  <!-- top header -->
+  <header class="appbar">
+    <img class="appbar-logo" src="brand/logo-transparent.png" alt="SAMAA MAJU" />
+    <span id="appbar-title" class="appbar-title">Scan</span>
+  </header>
+
+  <main class="content">
+
+    <!-- ───────── SCAN ───────── -->
+    <section id="screen-scan" class="screen active">
+      <p class="greeting">Hello, <span id="greet-name">there</span> 👋</p>
+
+      <div class="viewfinder-card">
+        <div id="reader" class="reader"></div>
+        <div class="reticle"></div>
+        <div id="scan-toast" class="scan-toast" hidden></div>
+      </div>
+
+      <div class="scan-controls">
+        <button id="scan-toggle" class="btn-pill">Start camera</button>
+      </div>
+
+      <div class="list-head">
+        <h3>This session <span id="session-count" class="count-badge">0</span></h3>
+        <button id="session-clear" class="link-btn">Clear</button>
+      </div>
+      <div id="session-list" class="row-list">
+        <p class="empty">Scan a barcode to begin. Scans stack up here.</p>
+      </div>
+    </section>
+
+    <!-- ───────── PRODUCTS ───────── -->
+    <section id="screen-products" class="screen">
+      <div class="search-bar">
+        <svg viewBox="0 0 24 24" class="search-ico"><path d="M21 21l-4.3-4.3M11 19a8 8 0 110-16 8 8 0 010 16z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="search-input" class="search-input" type="search" placeholder="Search products, SKU…" />
+      </div>
+      <div id="chips" class="chips"></div>
+      <div id="products-list" class="card-grid">
+        <p class="empty">Loading products…</p>
+      </div>
+    </section>
+
+    <!-- ───────── LOG ───────── -->
+    <section id="screen-log" class="screen">
+      <div class="list-head">
+        <h3>Scan history</h3>
+        <button id="log-clear" class="link-btn">Clear</button>
+      </div>
+      <div id="log-list" class="row-list">
+        <p class="empty">No scans yet.</p>
+      </div>
+    </section>
+
+    <!-- ───────── PROFILE ───────── -->
+    <section id="screen-profile" class="screen">
+      <div class="profile-head">
+        <img class="profile-avatar" src="brand/logo-transparent.png" alt="" />
+        <div>
+          <div id="profile-username" class="profile-name">—</div>
+          <div id="profile-email" class="profile-email muted">—</div>
+        </div>
+      </div>
+
+      <div class="profile-actions">
+        <button class="row-action" data-act="change-username">
+          <span>Change username</span><span class="chev">›</span>
+        </button>
+        <button class="row-action" data-act="change-password">
+          <span>Change password</span><span class="chev">›</span>
+        </button>
+        <button id="logout-btn" class="row-action danger">
+          <span>Log out</span><span class="chev">›</span>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- bottom nav -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-screen="scan" aria-label="Scan">
+      <span class="nav-ico">
+        <svg viewBox="0 0 24 24"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M3 12h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </span><span class="nav-lbl">Scan</span>
+    </button>
+    <button class="nav-btn" data-screen="products" aria-label="Products">
+      <span class="nav-ico">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-5 9 5-9 5-9-5zM3 9v6l9 5 9-5V9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </span><span class="nav-lbl">Products</span>
+    </button>
+    <button class="nav-btn" data-screen="log" aria-label="Log">
+      <span class="nav-ico">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </span><span class="nav-lbl">Log</span>
+    </button>
+    <button class="nav-btn" data-screen="profile" aria-label="Profile">
+      <span class="nav-ico">
+        <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 100-8 4 4 0 000 8zM5 20a7 7 0 0114 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </span><span class="nav-lbl">Profile</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ════════════════════ PRODUCT CARD (bottom sheet) ════════════════════ -->
+<div id="sheet-product" class="sheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet-panel">
+    <div class="sheet-grip"></div>
+    <div class="product-card">
+      <div class="product-img-wrap">
+        <img id="pc-img" class="product-img" alt="" />
+      </div>
+      <h2 id="pc-name" class="pc-name">—</h2>
+      <div class="pc-meta">
+        <span id="pc-sku" class="pc-sku">SKU —</span>
+      </div>
+      <div class="price-block">
+        <div class="price-row">
+          <span class="muted">Price</span>
+          <span id="pc-price" class="pc-price">RM —</span>
+        </div>
+        <div class="discount-row">
+          <span class="muted">Discount</span>
+          <div class="stepper">
+            <button id="disc-minus" class="step-btn" type="button">−</button>
+            <span id="disc-val" class="disc-val">0%</span>
+            <button id="disc-plus" class="step-btn" type="button">+</button>
+          </div>
+        </div>
+        <div class="price-row final">
+          <span class="muted">After discount</span>
+          <span id="pc-final" class="pc-final">RM —</span>
+        </div>
+      </div>
+      <svg id="pc-barcode" class="pc-barcode"></svg>
+      <button id="pc-edit" class="btn-primary">Request edit</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ NOT FOUND (bottom sheet) ════════════════════ -->
+<div id="sheet-notfound" class="sheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet-panel">
+    <div class="sheet-grip"></div>
+    <div class="notfound">
+      <div class="nf-emoji">🔍</div>
+      <h2>Barcode not recognised</h2>
+      <p class="muted">No product matches <b id="nf-code">—</b>.</p>
+      <button id="nf-add" class="btn-primary">Request: add this product</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ EDIT REQUEST (bottom sheet) ════════════════════ -->
+<div id="sheet-edit" class="sheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet-panel">
+    <div class="sheet-grip"></div>
+    <form id="edit-form" class="edit-form">
+      <h2>Request a change</h2>
+      <label class="fld"><span>SKU</span>
+        <input id="er-sku" class="input" type="text" readonly /></label>
+      <label class="fld"><span>Product</span>
+        <input id="er-name" class="input" type="text" readonly /></label>
+      <label class="fld"><span>What needs changing?</span>
+        <select id="er-field" class="input">
+          <option>Name</option><option>Price</option><option>Image</option>
+          <option>Barcode</option><option>Other</option>
+        </select></label>
+      <label class="fld"><span>Current value</span>
+        <input id="er-current" class="input" type="text" /></label>
+      <label class="fld"><span>Requested value</span>
+        <input id="er-new" class="input" type="text" /></label>
+      <label class="fld"><span>Reason</span>
+        <textarea id="er-reason" class="input" rows="3" maxlength="500"></textarea></label>
+      <div id="er-error" class="form-error" hidden></div>
+      <button class="btn-primary" type="submit">Submit request</button>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════════════ CREDENTIAL DIALOG (username / password) ════════ -->
+<div id="sheet-cred" class="sheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet-panel">
+    <div class="sheet-grip"></div>
+    <form id="cred-form" class="edit-form">
+      <h2 id="cred-title">Change</h2>
+      <label class="fld"><span>Current password</span>
+        <input id="cred-current" class="input" type="password" autocomplete="current-password" /></label>
+      <label class="fld" id="cred-new-wrap"><span id="cred-new-label">New value</span>
+        <input id="cred-new" class="input" type="text" /></label>
+      <div id="cred-error" class="form-error" hidden></div>
+      <button class="btn-primary" type="submit">Save</button>
+    </form>
+  </div>
+</div>
+
+<!-- global toast -->
+<div id="toast" class="toast" hidden></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
