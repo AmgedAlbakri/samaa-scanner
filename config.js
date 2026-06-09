@@ -12,7 +12,7 @@
  * ─────────────────────────────────────────────────────────────────────────── */
 window.SAMAA_CONFIG = {
   // e.g. "https://script.google.com/macros/s/AKfycbx....../exec"
-  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbwo8Qk-_tLUdjJu8ejaUsDBe1XFmQaRAlFif8NFcsv3WW6F-x2nQws0UStPXiDmvLHayA/exec",
+  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbzKmIRiEuuX4iosmdP1H1DG1L_kmaxkWeSSiEPAbqKMmoURDAvYipHSMTWFdftq46m0GA/exec",
 
   // Cooldown (ms) before the scanner re-arms after a successful read.
   SCAN_COOLDOWN_MS: 650,
