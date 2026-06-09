@@ -105,7 +105,32 @@
     // preload the whole catalogue once → instant local scans + ready Products tab,
     // and it doubles as an immediate session-validity check on open.
     loadProducts();
+    startHeartbeat();
   }
+
+  // ── session heartbeat ─────────────────────────────────────────────────────
+  // Scanning a cached product never hits the server, so without this a staffer
+  // whose "Active" was just unchecked could keep working. The heartbeat re-checks
+  // the session every 30s (and whenever the app is refocused) → the server returns
+  // inactive/device_revoked/unauthorized and we log them out promptly.
+  var heartbeat = null;
+  function checkSession() {
+    if (!token) return;
+    api('ping', {}).then(function (res) {
+      if (res && res.ok) return;
+      handleUnauthorized(res); // logs out on inactive / device_revoked / unauthorized; ignores network errors
+    });
+  }
+  function startHeartbeat() {
+    if (heartbeat) clearInterval(heartbeat);
+    heartbeat = setInterval(checkSession, 30000);
+  }
+  function stopHeartbeat() {
+    if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) checkSession();
+  });
 
   // show exactly one of the full-screen auth screens (enroll | blocked | login)
   function showAuthScreen(which) {
@@ -200,6 +225,7 @@
   });
 
   function doLogout(msg) {
+    stopHeartbeat();
     token = null; user = null;
     localStorage.removeItem(KEYS.token);
     localStorage.removeItem(KEYS.user);

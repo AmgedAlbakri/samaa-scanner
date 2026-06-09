@@ -65,6 +65,7 @@ function doPost(e) {
     switch (action) {
       case 'deviceStatus':    result = apiDeviceStatus_(req);    break;
       case 'enrollDevice':    result = apiEnrollDevice_(req);    break;
+      case 'ping':            result = apiPing_(req);            break;
       case 'login':           result = apiLogin_(req);           break;
       case 'lookup':          result = apiLookup_(req);          break;
       case 'search':          result = apiSearch_(req);          break;
@@ -111,6 +112,14 @@ function apiLogin_(req) {
   _clearFails_(identifier);
   var token = _createSession_(u.username, u.email);
   return { ok: true, sessionToken: token, user: { username: u.username, email: u.email } };
+}
+
+// Lightweight session check used by the client heartbeat. Reuses _requireSession_,
+// so it returns inactive / device_revoked / unauthorized the moment they apply —
+// letting the app log a deactivated user out within seconds even while idle.
+function apiPing_(req) {
+  var sess = _requireSession_(req);
+  return sess.ok ? { ok: true } : sess;
 }
 
 function apiChangeUsername_(req) {
