@@ -46,7 +46,8 @@ textarea.input{resize:vertical; min-height:64px}
 /* ---------- login ---------- */
 .screen-login{
   position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center;
-  padding:24px; background:var(--bg);
+  min-height:100vh; min-height:100dvh; background:var(--bg);
+  padding:calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px);
 }
 .screen-login:not(.active){display:none}
 .login-wrap{width:100%; max-width:360px; text-align:center}
@@ -56,7 +57,7 @@ textarea.input{resize:vertical; min-height:64px}
 #login-form{text-align:left}
 
 /* ---------- app shell ---------- */
-.app{min-height:100vh; display:flex; flex-direction:column}
+.app{min-height:100vh; min-height:100dvh; display:flex; flex-direction:column}
 .appbar{
   position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:12px;
   padding:calc(env(safe-area-inset-top) + 12px) 18px 12px;
@@ -108,6 +109,26 @@ textarea.input{resize:vertical; min-height:64px}
   overflow:hidden; text-overflow:ellipsis;
 }
 .scan-controls{display:flex; justify-content:center; margin:14px 0 6px}
+
+/* manual barcode entry (fallback when the camera can't read) */
+.manual-row{display:flex; gap:8px; align-items:center; margin:4px 2px 2px}
+.manual-input{
+  flex:1; min-width:0; padding:12px 16px; font-size:16px;
+  background:var(--card); border:1px solid var(--hair); border-radius:999px;
+  color:var(--text); outline:none; transition:border-color .15s;
+}
+.manual-input:focus{border-color:var(--navy)}
+.manual-row .btn-pill{flex:none; padding:12px 18px}
+
+/* camera zoom slider (only shown when the device supports zoom) */
+.zoom-wrap{
+  position:absolute; left:10%; right:10%; bottom:10px; z-index:3;
+  display:flex; align-items:center; gap:10px;
+  background:rgba(0,0,0,.42); border-radius:999px; padding:6px 14px;
+  backdrop-filter:blur(4px);
+}
+.zoom-ico{color:#fff; font-weight:800; font-size:16px; width:14px; text-align:center; flex:none}
+.zoom-range{flex:1; accent-color:var(--orange); height:22px}
 
 .list-head{display:flex; align-items:center; justify-content:space-between; margin:18px 2px 10px}
 .list-head h3{margin:0; font-size:16px}
@@ -214,7 +235,11 @@ textarea.input{resize:vertical; min-height:64px}
 .discount-row{display:flex; align-items:center; justify-content:space-between}
 .stepper{display:flex; align-items:center; gap:14px}
 .step-btn{width:34px; height:34px; border-radius:999px; background:#EDEDEF; font-size:20px; font-weight:700; line-height:1}
-.disc-val{min-width:46px; text-align:center; font-weight:700}
+.disc-field{display:inline-flex; align-items:center; gap:2px; background:#EDEDEF; border-radius:12px; padding:6px 10px}
+.disc-field:focus-within{outline:2px solid var(--navy)}
+.disc-val{width:42px; text-align:right; font-weight:700; font-size:16px; border:none; background:transparent; outline:none; color:var(--text); -moz-appearance:textfield}
+.disc-val::-webkit-outer-spin-button,.disc-val::-webkit-inner-spin-button{-webkit-appearance:none; margin:0}
+.disc-pct{font-weight:700; font-size:16px; color:var(--text)}
 .pc-barcode{width:100%; height:90px; background:#fff; border-radius:14px; box-shadow:var(--shadow-sm)}
 
 /* not found + forms */

@@ -18,7 +18,20 @@ var API_USERS_SHEET      = 'Users';
 var API_USERS_FIRST_ROW  = 3;            // row 1 = title?, row 2 = headers, row 3 = first user
 var API_EDIT_SHEET       = 'Edit Requests';
 var API_SESSIONS_SHEET   = '_Sessions';  // hidden, auto-created
+var API_DEVICES_SHEET    = '_Devices';   // hidden, auto-created — device enrollment/block ledger
 var API_SESSION_HOURS    = 12;
+
+// Device gate (one-time code per user, one device per user). OFF until the admin
+// has generated codes (bcDeviceGenerateCodes) and enrolled their own phone, so
+// enabling it never locks everyone out at once. Toggle via Script Property
+// DEVICE_GATE = on|off (default off).  Users sheet: col F = Device Code, col G = Enrolled Device.
+var API_DEVICE_FAILS      = 5;                 // wrong codes before a block
+var API_DEVICE_BLOCK_MS   = 60 * 60 * 1000;    // 1-hour temporary block
+
+function _deviceGateOn_() {
+  var v = String(PropertiesService.getScriptProperties().getProperty('DEVICE_GATE') || '').trim().toLowerCase();
+  return v === 'on' || v === 'true' || v === '1' || v === 'yes';
+}
 
 // §7 — the price column. Auto-detected by header text in row 4; override if needed.
 var BC_PRICE_HEADER_LABEL = 'MY Shopee/Lazada — RM';  // ← change here if the sheet header text changes
@@ -50,6 +63,8 @@ function doPost(e) {
   var result;
   try {
     switch (action) {
+      case 'deviceStatus':    result = apiDeviceStatus_(req);    break;
+      case 'enrollDevice':    result = apiEnrollDevice_(req);    break;
       case 'login':           result = apiLogin_(req);           break;
       case 'lookup':          result = apiLookup_(req);          break;
       case 'search':          result = apiSearch_(req);          break;
@@ -86,6 +101,12 @@ function apiLogin_(req) {
   if (!_verifyPassword_(u, password)) { _recordFail_(identifier); return { ok: false, reason: 'bad_credentials' }; }
 
   if (!u.active) return { ok: false, reason: 'inactive' };
+
+  // Device gate: this phone must already be enrolled to THIS user (one device/user).
+  if (_deviceGateOn_()) {
+    var dev = String(req.deviceId || '').trim();
+    if (!dev || dev !== u.deviceId) return { ok: false, reason: 'device_not_enrolled' };
+  }
 
   _clearFails_(identifier);
   var token = _createSession_(u.username, u.email);
@@ -175,9 +196,23 @@ function _enrich_(list) {
   });
 }
 
+// Cached price map: server-side lookups/allProducts re-scan the whole Products
+// sheet otherwise. Short 2-min cache keeps scans snappy; prices refresh quickly
+// enough for a scanner. Size-guarded (CacheService caps a value at ~100 KB).
+function _priceMap_() {
+  var cache = CacheService.getScriptCache();
+  try { var hit = cache.get('bc_pricemap'); if (hit) return JSON.parse(hit); } catch (e) {}
+  var map = _priceMapBuild_();
+  try {
+    var s = JSON.stringify(map);
+    if (s.length <= 90000) cache.put('bc_pricemap', s, 120);
+  } catch (e) {}
+  return map;
+}
+
 // §7 — resolve the "MY Shopee/Lazada — RM" column (first/leftmost match) and
 // build a { sku: { price, category } } map in one batch read.
-function _priceMap_() {
+function _priceMapBuild_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(_bcProductsSheetName_());
   if (!sh) return {};
   var first = _bcFirstDataRow_();
@@ -278,7 +313,7 @@ function _readUsers_() {
   var last = sh.getLastRow();
   if (last < API_USERS_FIRST_ROW) return [];
   var n = last - API_USERS_FIRST_ROW + 1;
-  var vals = sh.getRange(API_USERS_FIRST_ROW, 1, n, 5).getValues(); // A..E
+  var vals = sh.getRange(API_USERS_FIRST_ROW, 1, n, 7).getValues(); // A..G
   var out = [];
   for (var i = 0; i < n; i++) {
     var email = String(vals[i][0] || '').trim();
@@ -292,7 +327,9 @@ function _readUsers_() {
       username: uname,
       hash: String(vals[i][2] == null ? '' : vals[i][2]),
       active: active,
-      salt: String(vals[i][4] == null ? '' : vals[i][4]).trim()
+      salt: String(vals[i][4] == null ? '' : vals[i][4]).trim(),
+      deviceCode: String(vals[i][5] == null ? '' : vals[i][5]).trim(), // col F
+      deviceId:   String(vals[i][6] == null ? '' : vals[i][6]).trim()  // col G
     });
   }
   return out;
@@ -383,7 +420,16 @@ function _requireSession_(req) {
   for (var i = 0; i < vals.length; i++) {
     if (String(vals[i][0]) === token) {
       if (Number(vals[i][3]) > now) {
-        return { ok: true, token: token, username: String(vals[i][1]), email: String(vals[i][2]) };
+        var uname = String(vals[i][1]), email = String(vals[i][2]);
+        // Re-check the user every request so deactivating them (Active unchecked) or
+        // un-enrolling their device logs them out on their next action.
+        var u = _findUser_(email) || _findUser_(uname);
+        if (u && !u.active) return { ok: false, reason: 'inactive' };
+        if (u && _deviceGateOn_()) {
+          var dev = String(req && req.deviceId || '').trim();
+          if (!dev || dev !== u.deviceId) return { ok: false, reason: 'device_revoked' };
+        }
+        return { ok: true, token: token, username: uname, email: email };
       }
       return { ok: false, reason: 'unauthorized' }; // expired
     }
@@ -410,6 +456,218 @@ function _pruneSessions_(sh) {
   for (var i = vals.length - 1; i >= 0; i--) {
     if (Number(vals[i][3]) <= now) sh.deleteRow(2 + i);
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  DEVICE GATE  (one-time per-user code, one device per user, abuse lockout)
+//  Users sheet:  col F = Device Code (one-time)   col G = Enrolled Device (deviceId)
+//  _Devices:     A DeviceId | B Status | C Owner | D FailCount | E BlockedUntil | F LastSeen
+// ════════════════════════════════════════════════════════════════════════════
+function apiDeviceStatus_(req) {
+  if (!_deviceGateOn_()) return { ok: true, state: 'enrolled' };   // gate off → behave as before
+  var dev = String(req && req.deviceId || '').trim();
+  if (!dev) return { ok: true, state: 'unenrolled' };
+  var bs = _deviceBlockState_(dev);
+  if (bs.blocked) return { ok: true, state: 'blocked', until: bs.forever ? 0 : bs.until };
+  var users = _readUsers_();
+  for (var i = 0; i < users.length; i++) {
+    if (users[i].deviceId && users[i].deviceId === dev) return { ok: true, state: 'enrolled' };
+  }
+  return { ok: true, state: 'unenrolled' };
+}
+
+function apiEnrollDevice_(req) {
+  if (!_deviceGateOn_()) return { ok: true, state: 'enrolled' };
+  var dev  = String(req && req.deviceId || '').trim();
+  var code = String(req && req.code || '').trim();
+  if (!dev) return { ok: false, reason: 'bad_request' };
+
+  var bs = _deviceBlockState_(dev);
+  if (bs.blocked) return { ok: false, state: 'blocked', until: bs.forever ? 0 : bs.until };
+
+  var users = _readUsers_();
+  // already enrolled on this device → idempotent success
+  for (var j = 0; j < users.length; j++) {
+    if (users[j].deviceId && users[j].deviceId === dev) return { ok: true, state: 'enrolled' };
+  }
+  if (!code) return { ok: false, reason: 'bad_code', attemptsLeft: _deviceAttemptsLeft_(dev) };
+
+  // a code works once: match a user whose code == code AND who has no device yet
+  var match = null;
+  for (var i = 0; i < users.length; i++) {
+    if (users[i].deviceCode && users[i].deviceCode === code && !users[i].deviceId) { match = users[i]; break; }
+  }
+  if (!match) {
+    var left = _deviceRecordFail_(dev);   // increments; blocks for 1h at the limit
+    if (left <= 0) { var b = _deviceBlockState_(dev); return { ok: false, state: 'blocked', until: b.forever ? 0 : b.until }; }
+    return { ok: false, reason: 'bad_code', attemptsLeft: left };
+  }
+
+  var sh = _usersSheet_();
+  sh.getRange(match.row, 7).setValue(_sanitizeCell_(dev)); // col G ← bind device
+  sh.getRange(match.row, 6).setValue('');                  // col F ← consume the one-time code
+  _deviceClear_(dev);
+  _deviceSetEnrolled_(dev, match.username || match.email);
+  return { ok: true, state: 'enrolled' };
+}
+
+// ── _Devices ledger ─────────────────────────────────────────────────────────
+function _devicesSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(API_DEVICES_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(API_DEVICES_SHEET);
+    sh.getRange(1, 1, 1, 6).setValues([['Device ID', 'Status', 'Owner', 'Fail Count', 'Blocked Until', 'Last Seen']]);
+    sh.setFrozenRows(1);
+    try { sh.hideSheet(); } catch (e) {}
+  }
+  return sh;
+}
+
+function _deviceFindRow_(dev) {
+  var sh = _devicesSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return 0;
+  var ids = sh.getRange(2, 1, last - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) { if (String(ids[i][0]) === dev) return 2 + i; }
+  return 0;
+}
+
+function _deviceUpsertRow_(dev) {
+  var row = _deviceFindRow_(dev);
+  if (row) return row;
+  var sh = _devicesSheet_();
+  sh.appendRow([dev, '', '', 0, 0, _nowStr_()]);
+  return sh.getLastRow();
+}
+
+// returns { blocked, forever, until }; auto-clears an expired temporary block
+function _deviceBlockState_(dev) {
+  var row = _deviceFindRow_(dev);
+  if (!row) return { blocked: false, forever: false, until: 0 };
+  var sh = _devicesSheet_();
+  var status = String(sh.getRange(row, 2).getValue() || '').trim().toLowerCase();
+  var until  = Number(sh.getRange(row, 5).getValue() || 0);
+  if (status === 'blocked_forever') return { blocked: true, forever: true, until: 0 };
+  if (status === 'blocked') {
+    if (until > Date.now()) return { blocked: true, forever: false, until: until };
+    sh.getRange(row, 2).setValue('');  // expired → clear block + fail count
+    sh.getRange(row, 4).setValue(0);
+    sh.getRange(row, 5).setValue(0);
+  }
+  return { blocked: false, forever: false, until: 0 };
+}
+
+function _deviceAttemptsLeft_(dev) {
+  var row = _deviceFindRow_(dev);
+  if (!row) return API_DEVICE_FAILS;
+  var fails = Number(_devicesSheet_().getRange(row, 4).getValue() || 0);
+  return Math.max(0, API_DEVICE_FAILS - fails);
+}
+
+// increment fail count; block for 1h at the limit. Returns attempts left.
+function _deviceRecordFail_(dev) {
+  var sh = _devicesSheet_();
+  var row = _deviceUpsertRow_(dev);
+  var fails = Number(sh.getRange(row, 4).getValue() || 0) + 1;
+  sh.getRange(row, 4).setValue(fails);
+  sh.getRange(row, 6).setValue(_nowStr_());
+  if (fails >= API_DEVICE_FAILS) {
+    sh.getRange(row, 2).setValue('blocked');
+    sh.getRange(row, 5).setValue(Date.now() + API_DEVICE_BLOCK_MS);
+    return 0;
+  }
+  return API_DEVICE_FAILS - fails;
+}
+
+function _deviceClear_(dev) {
+  var row = _deviceFindRow_(dev);
+  if (!row) return;
+  var sh = _devicesSheet_();
+  sh.getRange(row, 2).setValue('');  // status
+  sh.getRange(row, 4).setValue(0);   // fail count
+  sh.getRange(row, 5).setValue(0);   // blocked until
+}
+
+function _deviceSetEnrolled_(dev, owner) {
+  var sh = _devicesSheet_();
+  var row = _deviceUpsertRow_(dev);
+  sh.getRange(row, 2).setValue('enrolled');
+  sh.getRange(row, 3).setValue(_sanitizeCell_(String(owner || '')));
+  sh.getRange(row, 6).setValue(_nowStr_());
+}
+
+function _nowStr_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Kuala_Lumpur', 'yyyy-MM-dd HH:mm:ss');
+}
+
+function _genDeviceCode_() {
+  var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous I/O/0/1
+  var s = '';
+  for (var i = 0; i < 8; i++) s += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+  return s.slice(0, 4) + '-' + s.slice(4); // e.g. "K7P2-9QXM"
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  ADMIN HELPERS — run these from the Apps Script editor (Run ▸ pick a function)
+// ════════════════════════════════════════════════════════════════════════════
+
+// One-time: add the Users F/G headers and create the hidden _Devices sheet.
+function bcDeviceSetup() {
+  var sh = _usersSheet_();
+  var hdrRow = API_USERS_FIRST_ROW - 1; // headers are the row above the first user
+  if (!String(sh.getRange(hdrRow, 6).getValue() || '').trim()) sh.getRange(hdrRow, 6).setValue('Device Code');
+  if (!String(sh.getRange(hdrRow, 7).getValue() || '').trim()) sh.getRange(hdrRow, 7).setValue('Enrolled Device');
+  _devicesSheet_();
+  Logger.log('Device gate setup done. Now run bcDeviceGenerateCodes(), then set Script Property DEVICE_GATE=on.');
+}
+
+// Issue a one-time code to every ACTIVE user who has no code and no enrolled device.
+// Reads back the codes so you can hand each staffer theirs.
+function bcDeviceGenerateCodes() {
+  var sh = _usersSheet_();
+  var users = _readUsers_();
+  var issued = [];
+  for (var i = 0; i < users.length; i++) {
+    var u = users[i];
+    if (!u.active) continue;
+    if (u.deviceCode || u.deviceId) continue;     // already has a code, or already enrolled
+    var code = _genDeviceCode_();
+    sh.getRange(u.row, 6).setValue(code);          // col F
+    issued.push((u.username || u.email) + '  →  ' + code);
+  }
+  Logger.log(issued.length ? ('Issued codes:\n' + issued.join('\n')) : 'No codes needed (all active users already have a code or device).');
+  return issued;
+}
+
+// Replacement phone / re-enroll: clear the user's device and issue a fresh code.
+function bcDeviceReissue(identifier) {
+  var u = _findUser_(identifier);
+  if (!u) { Logger.log('No user matching: ' + identifier); return; }
+  var sh = _usersSheet_();
+  if (u.deviceId) { _deviceClear_(u.deviceId); }   // free the old device's ledger row
+  sh.getRange(u.row, 7).setValue('');               // clear enrolled device (col G)
+  var code = _genDeviceCode_();
+  sh.getRange(u.row, 6).setValue(code);             // new one-time code (col F)
+  Logger.log('Reissued code for ' + (u.username || u.email) + '  →  ' + code);
+  return code;
+}
+
+// Reset a blocked device so it can try again.
+function bcDeviceUnblock(deviceId) {
+  _deviceClear_(String(deviceId || '').trim());
+  Logger.log('Unblocked device: ' + deviceId);
+}
+
+// Permanently block a device (survives the 1-hour auto-unblock).
+function bcDeviceBlockForever(deviceId) {
+  var dev = String(deviceId || '').trim();
+  if (!dev) return;
+  var sh = _devicesSheet_();
+  var row = _deviceUpsertRow_(dev);
+  sh.getRange(row, 2).setValue('blocked_forever');
+  sh.getRange(row, 5).setValue(0);
+  Logger.log('Blocked forever: ' + dev);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

@@ -13,6 +13,17 @@
   var token = localStorage.getItem(KEYS.token) || null;
   var user  = safeParse(localStorage.getItem(KEYS.user)) || null;
 
+  // Stable per-device id for the one-time enrollment gate. Generated once and kept
+  // in localStorage; sent with every request so the server can bind a device to a
+  // user and block abusive devices. (Clearing browser data yields a new id — by
+  // design the device then needs a fresh admin-issued code.)
+  var deviceId = localStorage.getItem(KEYS.device) || '';
+  if (!deviceId) {
+    deviceId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+             : 'd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+    try { localStorage.setItem(KEYS.device, deviceId); } catch (e) {}
+  }
+
   // in-memory caches
   var allProducts = [];          // for Products screen + search
   var barcodeIndex = {};         // barcode -> product, for INSTANT local lookups
@@ -31,7 +42,7 @@
     if (!CFG.WEB_APP_URL) {
       return Promise.resolve({ ok: false, reason: 'no_config', _client: true });
     }
-    var payload = Object.assign({ action: action }, params || {});
+    var payload = Object.assign({ action: action, deviceId: deviceId }, params || {});
     if (token && action !== 'login') payload.sessionToken = token;
     return fetch(CFG.WEB_APP_URL, {
       method: 'POST',
@@ -44,9 +55,15 @@
       .catch(function () { return { ok: false, reason: 'network', _client: true }; });
   }
 
-  // any authenticated call may report the session died → bounce to login
+  // any authenticated call may report the session died → bounce out.
+  //   inactive       → admin unchecked "Active" → log out with a clear message
+  //   device_revoked → this device was un-enrolled → log out and re-gate to enroll
+  //   unauthorized   → expired/invalid session
   function handleUnauthorized(res) {
-    if (res && res.reason === 'unauthorized') { doLogout('Session expired — please log in again.'); return true; }
+    if (!res) return false;
+    if (res.reason === 'inactive') { doLogout('Your account has been deactivated — contact admin.'); return true; }
+    if (res.reason === 'device_revoked') { doLogout('This device is no longer authorized.'); return true; }
+    if (res.reason === 'unauthorized') { doLogout('Session expired — please log in again.'); return true; }
     return false;
   }
 
@@ -90,11 +107,59 @@
     loadProducts();
   }
 
-  function showLogin() {
+  // show exactly one of the full-screen auth screens (enroll | blocked | login)
+  function showAuthScreen(which) {
     stopScanner();
     $('app').hidden = true;
-    $('screen-login').classList.add('active');
+    ['enroll', 'blocked', 'login'].forEach(function (s) {
+      $('screen-' + s).classList.toggle('active', s === which);
+    });
   }
+  function showLogin() { showAuthScreen('login'); }
+
+  function showBlocked(until) {
+    var msg = 'This device has been blocked. Please contact your administrator.';
+    if (until && Number(until) > Date.now()) {
+      var mins = Math.ceil((Number(until) - Date.now()) / 60000);
+      msg = 'Too many wrong attempts. This device is blocked for about ' +
+            mins + ' minute' + (mins === 1 ? '' : 's') + '.';
+    }
+    $('blocked-msg').textContent = msg;
+    showAuthScreen('blocked');
+  }
+
+  // Decide which gate to show when we have no valid session: a blocked device sees
+  // the block screen, an un-enrolled device must enter its one-time code, otherwise
+  // (enrolled, or the gate is disabled server-side) go straight to login.
+  function routeUnauthed(msg) {
+    if (msg) toast(msg, true);
+    api('deviceStatus', {}).then(function (res) {
+      var st = res && res.state;
+      if (st === 'blocked') showBlocked(res.until);
+      else if (st === 'unenrolled') showAuthScreen('enroll');
+      else showLogin(); // 'enrolled', gate off, or network error → let them try to log in
+    });
+  }
+
+  $('enroll-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var code = $('enroll-code').value.trim();
+    var errEl = $('enroll-error'); errEl.hidden = true;
+    if (!code) { showErr(errEl, 'Enter the access code.'); return; }
+    var btn = $('enroll-btn'); btn.disabled = true; btn.textContent = 'Activating…';
+    api('enrollDevice', { code: code }).then(function (res) {
+      btn.disabled = false; btn.textContent = 'Activate';
+      if (res && res.ok) { $('enroll-code').value = ''; showLogin(); toast('Device activated ✓'); return; }
+      if (res && res.state === 'blocked') { showBlocked(res.until); return; }
+      var left = (res && typeof res.attemptsLeft === 'number') ? res.attemptsLeft : null;
+      var msg = ({
+        bad_code: 'Incorrect code' + (left != null ? ' — ' + left + ' attempt' + (left === 1 ? '' : 's') + ' left.' : '.'),
+        network: 'Network error — check your connection.',
+        bad_response: 'Server error — please try again.'
+      })[res && res.reason] || 'Could not activate. Please try again.';
+      showErr(errEl, msg);
+    });
+  });
 
   $('login-form').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -116,6 +181,12 @@
         enterApp();
         return;
       }
+      // device isn't activated on this phone → send them to the enrollment gate
+      if (res.reason === 'device_not_enrolled') {
+        showAuthScreen('enroll');
+        showErr($('enroll-error'), 'Activate this device first with your access code.');
+        return;
+      }
       var msg = ({
         bad_credentials: 'Incorrect email/username or password.',
         inactive: 'Your account is not active — contact admin.',
@@ -132,8 +203,9 @@
     token = null; user = null;
     localStorage.removeItem(KEYS.token);
     localStorage.removeItem(KEYS.user);
-    showLogin();
-    if (msg) toast(msg, true);
+    // re-check device state so a revoked/blocked device lands on the right gate,
+    // not the login form. routeUnauthed shows the toast for us.
+    routeUnauthed(msg);
   }
   $('logout-btn').addEventListener('click', function () { doLogout(); });
 
@@ -151,6 +223,7 @@
   }
 
   var starting = false;
+  var videoTrack = null;
   function startScanner() {
     if (scanning || starting) return;
     if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); return; }
@@ -161,17 +234,32 @@
       experimentalFeatures: { useBarCodeDetectorIfSupported: true },
       verbose: false
     });
+    // Rear camera at HIGH resolution + CONTINUOUS autofocus. This is the key to
+    // reading reliably: at the browser's default ~640x480 an EAN-13's bars are too
+    // few pixels to decode, and without continuous focus the lens "hunts" for
+    // seconds. advanced[] constraints are best-effort (no OverconstrainedError).
+    var camConstraints = {
+      facingMode: { ideal: 'environment' },
+      width:  { ideal: 1920 },
+      height: { ideal: 1080 },
+      advanced: [{ focusMode: 'continuous' }]
+    };
     var cfg = {
       fps: 16,
-      qrbox: function (w, h) { var m = Math.floor(Math.min(w, h) * 0.72); return { width: m, height: Math.floor(m * 0.55) }; },
-      aspectRatio: 1.0,
+      // Wide, short box — retail barcodes are far wider than tall, so a near-square
+      // box wastes resolution and makes them harder to line up.
+      qrbox: function (w, h) {
+        return { width: Math.floor(w * 0.88),
+                 height: Math.floor(Math.min(h * 0.5, w * 0.45)) };
+      },
       disableFlip: true
     };
-    qr.start({ facingMode: 'environment' }, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
+    qr.start(camConstraints, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
       .then(function () {
         scanning = true; starting = false;
         $('viewfinder').classList.add('live');
         $('scan-toggle').textContent = 'Stop camera';
+        applyFocusTweaks();
       })
       .catch(function (err) {
         starting = false;
@@ -181,20 +269,73 @@
       });
   }
 
+  // Grab the live video track and (re-)assert continuous autofocus. Some Android
+  // browsers ignore focusMode in the initial getUserMedia but honour it via a
+  // later applyConstraints(), so we do it again once the stream is running.
+  function applyFocusTweaks() {
+    try {
+      var video = document.querySelector('#reader video');
+      var stream = video && video.srcObject;
+      videoTrack = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+      if (!videoTrack || !videoTrack.applyConstraints) return;
+      var caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+      if (caps.focusMode && caps.focusMode.indexOf('continuous') !== -1) {
+        videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+      }
+      setupZoom(caps);
+    } catch (e) {}
+  }
+
+  // Optical/digital zoom slider — only shown when the camera reports a zoom range.
+  // Lets staff read small or far-away barcodes without walking up to them.
+  function setupZoom(caps) {
+    var wrap = $('zoom-wrap'), range = $('zoom-range');
+    if (!wrap || !range) return;
+    if (!caps || !caps.zoom || !videoTrack || !(caps.zoom.max > caps.zoom.min)) { wrap.hidden = true; return; }
+    range.min = caps.zoom.min; range.max = caps.zoom.max; range.step = caps.zoom.step || 0.1;
+    var cur = (videoTrack.getSettings && videoTrack.getSettings().zoom) || caps.zoom.min;
+    range.value = cur;
+    wrap.hidden = false;
+    range.oninput = function () {
+      try { videoTrack.applyConstraints({ advanced: [{ zoom: Number(range.value) }] }).catch(function () {}); } catch (e) {}
+    };
+  }
+
+  // Tap the viewfinder while scanning to force a refocus (single-shot → continuous),
+  // for the occasional barcode the lens won't lock onto on its own.
+  function refocus() {
+    if (!videoTrack || !videoTrack.applyConstraints) return;
+    try {
+      var caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+      var modes = (caps && caps.focusMode) || [];
+      if (modes.indexOf('single-shot') !== -1 && modes.indexOf('continuous') !== -1) {
+        videoTrack.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] })
+          .then(function () { return videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); })
+          .catch(function () {});
+      } else if (modes.indexOf('continuous') !== -1) {
+        videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+      }
+      flashToast('Refocusing…');
+    } catch (e) {}
+  }
+
   function stopScanner() {
     if (qr && scanning) {
       try { qr.stop().then(function () { try { qr.clear(); } catch (e) {} }).catch(function () {}); } catch (e) {}
     }
     scanning = false;
+    videoTrack = null;
     var vf = $('viewfinder'); if (vf) vf.classList.remove('live');
+    var zw = $('zoom-wrap'); if (zw) zw.hidden = true;
     var t = $('scan-toggle'); if (t) t.textContent = 'Start camera';
   }
 
   $('scan-toggle').addEventListener('click', function () {
     if (scanning) stopScanner(); else startScanner();
   });
-  // tapping the viewfinder also (re)starts the camera — handy if auto-start was blocked
-  $('viewfinder').addEventListener('click', function () { if (!scanning) startScanner(); });
+  // tapping the viewfinder (re)starts the camera if stopped, or forces a refocus
+  // while running — handy for a barcode the lens won't lock onto.
+  $('viewfinder').addEventListener('click', function () { if (!scanning) startScanner(); else refocus(); });
 
   function onScan(decoded) {
     var now = Date.now();
@@ -246,6 +387,44 @@
     clearTimeout(flashToast._t);
     flashToast._t = setTimeout(function () { t.hidden = true; }, 1600);
   }
+
+  // ── manual barcode entry (camera-can't-read fallback) ─────────────────────
+  // Same data path as a camera scan: instant local cache first, then the server,
+  // then accept (adds to the session) or show the not-found sheet.
+  function manualLookup(code) {
+    code = String(code || '').replace(/\D/g, '');
+    if (!code) return;
+    var input = $('manual-code');
+    var local = barcodeIndex[code];
+    if (local) { acceptScan(local, code); input.value = ''; return; }
+    flashToast('Looking up ' + code + '…');
+    api('lookup', { barcode: code }).then(function (res) {
+      if (handleUnauthorized(res)) return;
+      if (res && res.found) {
+        var p = normalizeProduct(res);
+        if (p.barcode) barcodeIndex[p.barcode] = p;
+        acceptScan(p, code);
+        input.value = '';
+      } else {
+        flashToast('✗ Not found: ' + code);
+        openNotFound(code);   // keep the typed code so they can correct it
+      }
+    });
+  }
+  var manualTimer = null;
+  $('manual-form').addEventListener('submit', function (e) {
+    e.preventDefault(); clearTimeout(manualTimer); manualLookup($('manual-code').value);
+  });
+  $('manual-code').addEventListener('input', function () {
+    var el = $('manual-code');
+    var v = el.value.replace(/\D/g, '');
+    if (v !== el.value) el.value = v;        // digits only
+    clearTimeout(manualTimer);
+    // auto-fire once a complete retail barcode is typed (EAN-8 / UPC-A / EAN-13)
+    if (v.length === 8 || v.length === 12 || v.length === 13) {
+      manualTimer = setTimeout(function () { manualLookup(v); }, 150);
+    }
+  });
 
   // ── session list ────────────────────────────────────────────────────────
   function renderSession() {
@@ -414,23 +593,31 @@
     $('pc-name').textContent = p.name || '(no name)';
     $('pc-sku').textContent = p.sku ? 'SKU ' + p.sku : 'SKU —';
     $('pc-price').textContent = p.price != null ? 'RM ' + fmt(p.price) : 'RM —';
-    updateDiscount();
+    discount = 0; $('disc-val').value = '0'; updateFinal();
     renderBarcodePreview(p.barcode);
     openSheet('sheet-product');
   }
 
-  function updateDiscount() {
-    $('disc-val').textContent = discount + '%';
+  // any whole percent 0–100 (staff pick the exact figure: 15, 18, 20, …)
+  function clampPct(v) { v = Math.round(Number(v)); return isFinite(v) ? Math.min(100, Math.max(0, v)) : 0; }
+  function updateFinal() {
     var p = currentProduct;
-    if (p && p.price != null) {
-      var f = p.price * (1 - discount / 100);
-      $('pc-final').textContent = 'RM ' + fmt(f);
-    } else {
-      $('pc-final').textContent = 'RM —';
-    }
+    $('pc-final').textContent = (p && p.price != null)
+      ? 'RM ' + fmt(p.price * (1 - discount / 100)) : 'RM —';
   }
-  $('disc-minus').addEventListener('click', function () { discount = Math.max(0, discount - 5); updateDiscount(); });
-  $('disc-plus').addEventListener('click', function () { discount = Math.min(95, discount + 5); updateDiscount(); });
+  var discInput = $('disc-val');
+  // live typing: use the value for the math but don't rewrite the field (keeps the caret)
+  discInput.addEventListener('input', function () {
+    discount = discInput.value === '' ? 0 : clampPct(discInput.value);
+    updateFinal();
+  });
+  discInput.addEventListener('blur', function () {
+    discount = clampPct(discInput.value === '' ? 0 : discInput.value);
+    discInput.value = String(discount); updateFinal();
+  });
+  function stepDiscount(delta) { discount = clampPct(discount + delta); discInput.value = String(discount); updateFinal(); }
+  $('disc-minus').addEventListener('click', function () { stepDiscount(-1); });
+  $('disc-plus').addEventListener('click', function () { stepDiscount(1); });
 
   function renderBarcodePreview(code) {
     var svg = $('pc-barcode');
@@ -610,6 +797,6 @@
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
   }
-  if (token && user) enterApp(); else showLogin();
+  if (token && user) enterApp(); else routeUnauthed();
 
 })();

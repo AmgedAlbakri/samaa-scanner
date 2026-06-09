@@ -20,8 +20,33 @@
 </head>
 <body>
 
+<!-- ═══════════════════════ DEVICE ENROLL (one-time code) ═══════════════════════ -->
+<section id="screen-enroll" class="screen-login">
+  <div class="login-wrap">
+    <img class="login-logo" src="brand/logo-transparent.png" alt="SAMAA MAJU" />
+    <h1 class="login-title">Activate this device</h1>
+    <p class="login-sub">Enter the one-time code from your administrator</p>
+    <form id="enroll-form" autocomplete="off">
+      <input id="enroll-code" class="input" type="text" inputmode="text"
+             placeholder="Access code" autocomplete="off" autocapitalize="characters"
+             spellcheck="false" required />
+      <div id="enroll-error" class="form-error" hidden></div>
+      <button id="enroll-btn" class="btn-primary" type="submit">Activate</button>
+    </form>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ DEVICE BLOCKED ═══════════════════════════ -->
+<section id="screen-blocked" class="screen-login">
+  <div class="login-wrap">
+    <div class="nf-emoji">🚫</div>
+    <h1 class="login-title">Device blocked</h1>
+    <p id="blocked-msg" class="login-sub">This device has been blocked. Please contact your administrator.</p>
+  </div>
+</section>
+
 <!-- ════════════════════════════ LOGIN ════════════════════════════ -->
-<section id="screen-login" class="screen screen-login active">
+<section id="screen-login" class="screen-login active">
   <div class="login-wrap">
     <img class="login-logo" src="brand/logo-transparent.png" alt="SAMAA MAJU" />
     <h1 class="login-title">Staff Scanner</h1>
@@ -57,11 +82,23 @@
         <div class="reticle"></div>
         <div id="tap-hint" class="tap-hint">Tap to start the camera</div>
         <div id="scan-toast" class="scan-toast" hidden></div>
+        <div id="zoom-wrap" class="zoom-wrap" hidden>
+          <span class="zoom-ico">−</span>
+          <input id="zoom-range" class="zoom-range" type="range" min="1" max="5" step="0.1" value="1"
+                 aria-label="Camera zoom" />
+          <span class="zoom-ico">+</span>
+        </div>
       </div>
 
       <div class="scan-controls">
         <button id="scan-toggle" class="btn-pill">Start camera</button>
       </div>
+
+      <form id="manual-form" class="manual-row" autocomplete="off">
+        <input id="manual-code" class="manual-input" type="text" inputmode="numeric"
+               pattern="[0-9]*" placeholder="Can't scan? Type the barcode" aria-label="Barcode number" />
+        <button id="manual-go" class="btn-pill secondary" type="submit">Look up</button>
+      </form>
 
       <div class="list-head">
         <h3>This session <span id="session-count" class="count-badge">0</span></h3>
@@ -167,7 +204,11 @@
           <span class="muted">Discount</span>
           <div class="stepper">
             <button id="disc-minus" class="step-btn" type="button">−</button>
-            <span id="disc-val" class="disc-val">0%</span>
+            <span class="disc-field">
+              <input id="disc-val" class="disc-val" type="number" inputmode="numeric"
+                     min="1" max="100" step="1" value="0" aria-label="Discount percent" />
+              <span class="disc-pct">%</span>
+            </span>
             <button id="disc-plus" class="step-btn" type="button">+</button>
           </div>
         </div>
