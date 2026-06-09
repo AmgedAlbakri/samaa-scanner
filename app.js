@@ -269,7 +269,8 @@
         if (i + 1 < attempts.length) { tryStart(i + 1); return; }
         starting = false;
         $('tap-hint').textContent = 'Tap to start the camera';
-        toast('Cannot open camera — allow camera access in your browser settings.', true);
+        var en = (err && (err.name || err.message)) ? (' [' + (err.name || err.message) + ']') : '';
+        toast('Cannot open camera' + en + ' — allow camera access in your browser settings.', true);
       });
     })(0);
   }
