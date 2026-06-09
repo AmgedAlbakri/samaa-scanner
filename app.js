@@ -234,16 +234,6 @@
       experimentalFeatures: { useBarCodeDetectorIfSupported: true },
       verbose: false
     });
-    // Rear camera at HIGH resolution + CONTINUOUS autofocus. This is the key to
-    // reading reliably: at the browser's default ~640x480 an EAN-13's bars are too
-    // few pixels to decode, and without continuous focus the lens "hunts" for
-    // seconds. advanced[] constraints are best-effort (no OverconstrainedError).
-    var camConstraints = {
-      facingMode: { ideal: 'environment' },
-      width:  { ideal: 1920 },
-      height: { ideal: 1080 },
-      advanced: [{ focusMode: 'continuous' }]
-    };
     var cfg = {
       fps: 16,
       // Wide, short box — retail barcodes are far wider than tall, so a near-square
@@ -254,19 +244,34 @@
       },
       disableFlip: true
     };
-    qr.start(camConstraints, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
-      .then(function () {
+    // Try richer settings first, then fall back, so the camera ALWAYS opens on a
+    // device that can't satisfy the high-res request (some phones — iOS especially —
+    // reject the whole getUserMedia call otherwise). NOTE: no focusMode here — it's
+    // re-applied after the stream starts in applyFocusTweaks(), where a rejection is
+    // harmless. High res matters because at ~640x480 an EAN-13's bars are too few
+    // pixels to decode.
+    var attempts = [
+      { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      { facingMode: { ideal: 'environment' } },
+      { facingMode: 'environment' }
+    ];
+    (function tryStart(i) {
+      var p;
+      try { p = qr.start(attempts[i], cfg, onScan, function () { /* per-frame decode misses: ignore */ }); }
+      catch (e) { p = Promise.reject(e); }
+      p.then(function () {
         scanning = true; starting = false;
         $('viewfinder').classList.add('live');
         $('scan-toggle').textContent = 'Stop camera';
         applyFocusTweaks();
-      })
-      .catch(function (err) {
+      }).catch(function (err) {
+        console.warn('camera start failed (attempt ' + i + ')', err);
+        if (i + 1 < attempts.length) { tryStart(i + 1); return; }
         starting = false;
         $('tap-hint').textContent = 'Tap to start the camera';
-        toast('Cannot open camera — allow camera access.', true);
-        console.warn('camera start failed', err);
+        toast('Cannot open camera — allow camera access in your browser settings.', true);
       });
+    })(0);
   }
 
   // Grab the live video track and (re-)assert continuous autofocus. Some Android
