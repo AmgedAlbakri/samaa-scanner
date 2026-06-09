@@ -236,43 +236,28 @@
     });
     var cfg = {
       fps: 16,
-      // Wide, short box — retail barcodes are far wider than tall, so a near-square
-      // box wastes resolution and makes them harder to line up.
-      qrbox: function (w, h) {
-        return { width: Math.floor(w * 0.88),
-                 height: Math.floor(Math.min(h * 0.5, w * 0.45)) };
-      },
+      qrbox: function (w, h) { var m = Math.floor(Math.min(w, h) * 0.72); return { width: m, height: Math.floor(m * 0.55) }; },
+      aspectRatio: 1.0,
       disableFlip: true
     };
-    // Try richer settings first, then fall back, so the camera ALWAYS opens on a
-    // device that can't satisfy the high-res request (some phones — iOS especially —
-    // reject the whole getUserMedia call otherwise). NOTE: no focusMode here — it's
-    // re-applied after the stream starts in applyFocusTweaks(), where a rejection is
-    // harmless. High res matters because at ~640x480 an EAN-13's bars are too few
-    // pixels to decode.
-    var attempts = [
-      { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-      { facingMode: { ideal: 'environment' } },
-      { facingMode: 'environment' }
-    ];
-    (function tryStart(i) {
-      var p;
-      try { p = qr.start(attempts[i], cfg, onScan, function () { /* per-frame decode misses: ignore */ }); }
-      catch (e) { p = Promise.reject(e); }
-      p.then(function () {
+    // Original simple constraints — proven to open the camera across phones. We do
+    // NOT put resolution/focusMode in getUserMedia (some devices reject the whole
+    // request and the camera never opens). Focus + zoom are applied AFTER the stream
+    // is live in applyFocusTweaks(), where they're best-effort and can't block start.
+    qr.start({ facingMode: 'environment' }, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
+      .then(function () {
         scanning = true; starting = false;
         $('viewfinder').classList.add('live');
         $('scan-toggle').textContent = 'Stop camera';
         applyFocusTweaks();
-      }).catch(function (err) {
-        console.warn('camera start failed (attempt ' + i + ')', err);
-        if (i + 1 < attempts.length) { tryStart(i + 1); return; }
+      })
+      .catch(function (err) {
         starting = false;
         $('tap-hint').textContent = 'Tap to start the camera';
         var en = (err && (err.name || err.message)) ? (' [' + (err.name || err.message) + ']') : '';
-        toast('Cannot open camera' + en + ' — allow camera access in your browser settings.', true);
+        toast('Cannot open camera' + en + ' — allow camera access.', true);
+        console.warn('camera start failed', err);
       });
-    })(0);
   }
 
   // Grab the live video track and (re-)assert continuous autofocus. Some Android
