@@ -439,6 +439,25 @@
       o.start(t); o.stop(t + 0.16);
     } catch (e) {}
   }
+  // low "not found" buzz — two short descending low tones
+  function buzz() {
+    try {
+      ensureAudio();
+      if (!audioCtx) return;
+      var t = audioCtx.currentTime;
+      [220, 160].forEach(function (freq, i) {
+        var s = t + i * 0.18;
+        var o = audioCtx.createOscillator();
+        var g = audioCtx.createGain();
+        o.type = 'square'; o.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, s);
+        g.gain.exponentialRampToValueAtTime(0.22, s + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.16);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(s); o.stop(s + 0.17);
+      });
+    } catch (e) {}
+  }
 
   function flashToast(msg) {
     var t = $('scan-toast');
@@ -702,6 +721,7 @@
   //  NOT FOUND
   // ════════════════════════════════════════════════════════════════════════
   function openNotFound(code) {
+    buzz();
     $('nf-code').textContent = code;
     $('sheet-notfound').dataset.code = code;
     openSheet('sheet-notfound');
