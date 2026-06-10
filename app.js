@@ -296,8 +296,18 @@
       videoTrack = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
       if (!videoTrack || !videoTrack.applyConstraints) return;
       var caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+      // Everything here runs AFTER the camera is already open, so none of it can
+      // stop the camera opening (the bug we hit before). Each constraint is applied
+      // independently and best-effort:
+      //  • continuous autofocus → no more focus "hunting"
+      //  • bump to a sharper resolution → more pixels per barcode bar = quicker reads
       if (caps.focusMode && caps.focusMode.indexOf('continuous') !== -1) {
         videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+      }
+      if (caps.width && caps.height) {
+        var w = Math.min(1920, caps.width.max || 1280);
+        var h = Math.min(1080, caps.height.max || 720);
+        videoTrack.applyConstraints({ width: { ideal: w }, height: { ideal: h } }).catch(function () {});
       }
       setupZoom(caps);
     } catch (e) {}
@@ -437,8 +447,9 @@
     var v = el.value.replace(/\D/g, '');
     if (v !== el.value) el.value = v;        // digits only
     clearTimeout(manualTimer);
-    // auto-fire once a complete retail barcode is typed (EAN-8 / UPC-A / EAN-13)
-    if (v.length === 8 || v.length === 12 || v.length === 13) {
+    // auto-fire only at a full UPC-A / EAN-13 length (12–13 digits); any other
+    // length must be submitted with the Look up button.
+    if (v.length === 12 || v.length === 13) {
       manualTimer = setTimeout(function () { manualLookup(v); }, 150);
     }
   });
