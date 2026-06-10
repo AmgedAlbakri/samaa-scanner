@@ -360,11 +360,12 @@
   }
 
   $('scan-toggle').addEventListener('click', function () {
+    ensureAudio();   // unlock sound on this user gesture (needed for iOS)
     if (scanning) stopScanner(); else startScanner();
   });
   // tapping the viewfinder (re)starts the camera if stopped, or forces a refocus
   // while running — handy for a barcode the lens won't lock onto.
-  $('viewfinder').addEventListener('click', function () { if (!scanning) startScanner(); else refocus(); });
+  $('viewfinder').addEventListener('click', function () { ensureAudio(); if (!scanning) startScanner(); else refocus(); });
 
   function onScan(decoded) {
     var now = Date.now();
@@ -407,7 +408,36 @@
     sessionScans.unshift(entry);
     renderSession();
     pushLog(entry);
+    beep();
     flashToast('✓ ' + p.name);
+  }
+
+  // ── success beep (Web Audio — no file, works offline) ─────────────────────
+  var audioCtx = null;
+  function ensureAudio() {
+    try {
+      if (!audioCtx) {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      }
+      // iOS/Safari start the context suspended until a user gesture — resume it
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+  }
+  function beep() {
+    try {
+      ensureAudio();
+      if (!audioCtx) return;
+      var t = audioCtx.currentTime;
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = 1000;          // crisp ~1 kHz "blip"
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.3, t + 0.01); // quick attack (no click)
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t); o.stop(t + 0.16);
+    } catch (e) {}
   }
 
   function flashToast(msg) {
@@ -442,7 +472,7 @@
   }
   var manualTimer = null;
   $('manual-form').addEventListener('submit', function (e) {
-    e.preventDefault(); clearTimeout(manualTimer); manualLookup($('manual-code').value);
+    e.preventDefault(); ensureAudio(); clearTimeout(manualTimer); manualLookup($('manual-code').value);
   });
   $('manual-code').addEventListener('input', function () {
     var el = $('manual-code');
