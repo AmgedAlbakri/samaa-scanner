@@ -305,8 +305,10 @@
         videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
       }
       if (caps.width && caps.height) {
-        var w = Math.min(1920, caps.width.max || 1280);
-        var h = Math.min(1080, caps.height.max || 720);
+        // 720p is plenty of detail for a barcode and decodes faster than 1080p on
+        // the WASM/JS path (iPhone/Huawei/Honor), so reads stay quick everywhere.
+        var w = Math.min(1280, caps.width.max || 1280);
+        var h = Math.min(720, caps.height.max || 720);
         videoTrack.applyConstraints({ width: { ideal: w }, height: { ideal: h } }).catch(function () {});
       }
       setupZoom(caps);

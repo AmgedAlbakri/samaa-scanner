@@ -15,6 +15,15 @@
 
   <!-- Camera scanning (works on iOS Safari + Android Chrome) -->
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- Fast barcode reading on phones WITHOUT a native BarcodeDetector (iPhone/Safari,
+       Huawei, Honor): a WASM (ZXing) BarcodeDetector polyfill that html5-qrcode picks
+       up automatically. Only fills in when missing, so Chrome Android keeps its native
+       (already-fast) detector — no regression there. -->
+  <script type="module">
+    import('https://esm.sh/barcode-detector@2/side-effects').catch(function (e) {
+      console.warn('barcode-detector polyfill failed to load', e);
+    });
+  </script>
   <!-- Barcode preview rendering -->
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 </head>
