@@ -319,8 +319,10 @@
     if (!videoTrack || !videoTrack.applyConstraints) return;
     var c = { advanced: [{ focusMode: 'continuous' }] };
     if (caps && caps.width && caps.height) {
-      c.width  = { ideal: Math.min(1280, caps.width.max  || 1280) };
-      c.height = { ideal: Math.min(720,  caps.height.max || 720) };
+      // 1080p, not 720p: small EAN-13 bars need more pixels per bar to decode,
+      // especially on phones whose web camera focus is soft up close.
+      c.width  = { ideal: Math.min(1920, caps.width.max  || 1920) };
+      c.height = { ideal: Math.min(1080, caps.height.max || 1080) };
     }
     try {
       videoTrack.applyConstraints(c).catch(function () {
@@ -355,7 +357,9 @@
         videoTrack.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] })
           .then(function () { return videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); })
           .catch(function () {});
-      } else if (modes.indexOf('continuous') !== -1) {
+      } else {
+        // Phones that don't advertise focusMode (Huawei/Honor browsers) sometimes
+        // still honour it — try unconditionally instead of giving up.
         videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
       }
       flashToast('Refocusing…');
