@@ -80,9 +80,11 @@ textarea.input{resize:vertical; min-height:64px}
 }
 .reader{position:absolute; inset:0}
 .reader video{width:100%!important; height:100%!important; object-fit:cover!important}
-/* hide html5-qrcode's default chrome */
+/* hide html5-qrcode's default chrome + its qrbox overlay (we draw our own .reticle,
+   so the library's bracketed frame/shading would be a second, misaligned box) */
 #reader__dashboard_section_csr, #reader__status_span, #reader__dashboard_section_swaplink,
-#reader img[alt="Info icon"], #reader__header_message{display:none!important}
+#reader img[alt="Info icon"], #reader__header_message,
+#reader #qr-shaded-region, #qr-shaded-region{display:none!important}
 .reticle{
   position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
   width:62%; height:38%; border-radius:16px; pointer-events:none; overflow:hidden;

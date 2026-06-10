@@ -262,7 +262,14 @@
     });
     var cfg = {
       fps: 16,
-      qrbox: function (w, h) { var m = Math.floor(Math.min(w, h) * 0.72); return { width: m, height: Math.floor(m * 0.55) }; },
+      // Keep a qrbox so html5-qrcode crops the decode to the centre (smaller image =
+      // faster reads, esp. on the WASM path). Sized to match our .reticle. Its
+      // bracket overlay is hidden in CSS (#qr-shaded-region) so only the reticle
+      // shows — the two overlapping frames were the UI bug.
+      qrbox: function (w, h) {
+        var bw = Math.floor(Math.min(w * 0.8, w));
+        return { width: bw, height: Math.floor(Math.min(h * 0.45, bw * 0.62)) };
+      },
       aspectRatio: 1.0,
       disableFlip: true
     };
@@ -296,22 +303,29 @@
       videoTrack = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
       if (!videoTrack || !videoTrack.applyConstraints) return;
       var caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-      // Everything here runs AFTER the camera is already open, so none of it can
-      // stop the camera opening (the bug we hit before). Each constraint is applied
-      // independently and best-effort:
-      //  • continuous autofocus → no more focus "hunting"
-      //  • bump to a sharper resolution → more pixels per barcode bar = quicker reads
-      if (caps.focusMode && caps.focusMode.indexOf('continuous') !== -1) {
-        videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
-      }
-      if (caps.width && caps.height) {
-        // 720p is plenty of detail for a barcode and decodes faster than 1080p on
-        // the WASM/JS path (iPhone/Huawei/Honor), so reads stay quick everywhere.
-        var w = Math.min(1280, caps.width.max || 1280);
-        var h = Math.min(720, caps.height.max || 720);
-        videoTrack.applyConstraints({ width: { ideal: w }, height: { ideal: h } }).catch(function () {});
-      }
+      // Runs AFTER the camera is open, so it can never block opening. Best-effort:
+      // continuous autofocus + a sharper resolution. We apply now and again once the
+      // stream settles — some cameras only accept the focus constraint after warm-up.
+      applyFocusAndRes(caps);
+      setTimeout(function () { applyFocusAndRes(caps); }, 1200);
       setupZoom(caps);
+    } catch (e) {}
+  }
+
+  // Apply continuous focus (+720p) in ONE call so resolution doesn't reset focus.
+  // We try focus unconditionally — some phones honour it without advertising it in
+  // getCapabilities(). If the combined set is rejected, fall back to focus-only.
+  function applyFocusAndRes(caps) {
+    if (!videoTrack || !videoTrack.applyConstraints) return;
+    var c = { advanced: [{ focusMode: 'continuous' }] };
+    if (caps && caps.width && caps.height) {
+      c.width  = { ideal: Math.min(1280, caps.width.max  || 1280) };
+      c.height = { ideal: Math.min(720,  caps.height.max || 720) };
+    }
+    try {
+      videoTrack.applyConstraints(c).catch(function () {
+        try { videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); } catch (e) {}
+      });
     } catch (e) {}
   }
 
