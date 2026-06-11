@@ -20,9 +20,21 @@
        up automatically. Only fills in when missing, so Chrome Android keeps its native
        (already-fast) detector — no regression there. -->
   <script type="module">
-    import('https://esm.sh/barcode-detector@2/side-effects').catch(function (e) {
-      console.warn('barcode-detector polyfill failed to load', e);
-    });
+    import('https://esm.sh/barcode-detector@2/side-effects')
+      .then(function () {
+        // Verify the detector actually decodes: its WASM engine is fetched lazily
+        // from another CDN, and if that fetch fails BarcodeDetector still EXISTS
+        // but rejects every frame — html5-qrcode then "scans" forever without a
+        // single read and never falls back. Probe once; if broken, remove the
+        // global so html5-qrcode uses its built-in JS decoder instead.
+        if (!window.BarcodeDetector) return;
+        var c = document.createElement('canvas'); c.width = c.height = 16;
+        return new window.BarcodeDetector({ formats: ['ean_13'] }).detect(c);
+      })
+      .catch(function (e) {
+        console.warn('BarcodeDetector unusable — falling back to JS decoder', e);
+        try { window.BarcodeDetector = undefined; } catch (_) {}
+      });
   </script>
   <!-- Barcode preview rendering -->
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>

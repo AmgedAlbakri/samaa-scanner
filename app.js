@@ -240,6 +240,9 @@
   // ════════════════════════════════════════════════════════════════════════
   var qr = null, scanning = false, busy = false;
   var lastCode = '', lastAt = 0;
+  // iPad Safari reports itself as MacIntel, hence the maxTouchPoints check.
+  var IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
   function supportedFormats() {
     // EAN-13 first, then CODE128, EAN-8, UPC-A, QR (§2)
@@ -318,9 +321,11 @@
   function applyFocusAndRes(caps) {
     if (!videoTrack || !videoTrack.applyConstraints) return;
     var c = { advanced: [{ focusMode: 'continuous' }] };
-    if (caps && caps.width && caps.height) {
-      // 1080p, not 720p: small EAN-13 bars need more pixels per bar to decode,
-      // especially on phones whose web camera focus is soft up close.
+    // 1080p, not 720p: small EAN-13 bars need more pixels per bar to decode,
+    // especially on phones whose web camera focus is soft up close. NOT on iOS:
+    // WebKit can freeze the live video when the resolution changes mid-stream,
+    // leaving the decoder re-reading one stale frame forever.
+    if (!IS_IOS && caps && caps.width && caps.height) {
       c.width  = { ideal: Math.min(1920, caps.width.max  || 1920) };
       c.height = { ideal: Math.min(1080, caps.height.max || 1080) };
     }
