@@ -253,6 +253,43 @@
 
   var starting = false;
   var videoTrack = null;
+  var pickedCameraId = null;   // cached main-lens deviceId, resolved once per load
+
+  // Pick the MAIN rear lens. Android phones expose several physical back cameras
+  // (main / ultra-wide / telephoto / macro / depth). facingMode:'environment' lets
+  // Chrome choose, and it frequently picks the ULTRA-WIDE — which cannot focus on a
+  // barcode held close, so the image stays blurry and nothing ever decodes. We pick
+  // the plain main lens by deviceId instead. Labels are only populated AFTER camera
+  // permission is granted, so if they're empty we briefly open a stream to unlock
+  // them, then enumerate. Returns a deviceId string, or null to fall back to
+  // facingMode (iOS has a single logical back camera, so this is mostly a no-op there).
+  function resolveCamera() {
+    var md = navigator.mediaDevices;
+    if (!md || !md.enumerateDevices) return Promise.resolve(null);
+
+    function chooseFrom(devices) {
+      var vids = devices.filter(function (d) { return d.kind === 'videoinput' && d.label; });
+      if (!vids.length) return null;
+      var back = vids.filter(function (d) { return /back|rear|environment|arrière|trasera|背面/i.test(d.label); });
+      var pool = back.length ? back : vids;
+      // Drop the specialty lenses; keep only a plain main camera if one remains.
+      var special = /wide|ultra|tele|zoom|depth|macro|mono|true ?depth|front/i;
+      var main = pool.filter(function (d) { return !special.test(d.label); });
+      var chosen = main[0] || pool[0];
+      return chosen ? chosen.deviceId : null;
+    }
+
+    return md.enumerateDevices().then(function (devices) {
+      var id = chooseFrom(devices);
+      if (id) return id;
+      // Labels empty → no permission yet. Open a throwaway stream to unlock labels.
+      return md.getUserMedia({ video: { facingMode: 'environment' } }).then(function (s) {
+        try { s.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+        return md.enumerateDevices().then(chooseFrom);
+      }).catch(function () { return null; });
+    }).catch(function () { return null; });
+  }
+
   function startScanner() {
     if (scanning || starting) return;
     if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); return; }
@@ -264,7 +301,9 @@
       verbose: false
     });
     var cfg = {
-      fps: 16,
+      // More decode attempts per second = quicker reads on both platforms. The native
+      // detector (Android) and the WASM decoder (iPhone) both comfortably keep up at 24.
+      fps: 24,
       // Keep a qrbox so html5-qrcode crops the decode to the centre (smaller image =
       // faster reads, esp. on the WASM path). Sized to match our .reticle. Its
       // bracket overlay is hidden in CSS (#qr-shaded-region) so only the reticle
@@ -276,11 +315,23 @@
       aspectRatio: 1.0,
       disableFlip: true
     };
-    // Original simple constraints — proven to open the camera across phones. We do
-    // NOT put resolution/focusMode in getUserMedia (some devices reject the whole
-    // request and the camera never opens). Focus + zoom are applied AFTER the stream
-    // is live in applyFocusTweaks(), where they're best-effort and can't block start.
-    qr.start({ facingMode: 'environment' }, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
+
+    // Resolve the main lens first (cached after the first run), then start. If we
+    // can't determine one, fall back to facingMode:'environment' — the old behaviour.
+    (pickedCameraId ? Promise.resolve(pickedCameraId) : resolveCamera())
+      .then(function (id) {
+        pickedCameraId = id;
+        var source = id ? { deviceId: { exact: id } } : { facingMode: 'environment' };
+        // We do NOT put resolution/focusMode in the start constraints (some devices
+        // reject the whole request and the camera never opens). Focus + zoom are
+        // applied AFTER the stream is live in applyFocusTweaks().
+        return qr.start(source, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
+          .catch(function (err) {
+            // An exact deviceId can be over-constrained on some phones; retry loose.
+            if (id) { pickedCameraId = null; return qr.start({ facingMode: 'environment' }, cfg, onScan, function () {}); }
+            throw err;
+          });
+      })
       .then(function () {
         scanning = true; starting = false;
         $('viewfinder').classList.add('live');
