@@ -394,28 +394,14 @@
 
   // Optical/digital zoom slider — only shown when the camera reports a zoom range.
   // Lets staff read small or far-away barcodes without walking up to them.
-  var zoomApplied = false;   // only auto-zoom once per camera session
   function setupZoom(caps) {
     var wrap = $('zoom-wrap'), range = $('zoom-range');
     if (!wrap || !range) return;
     if (!caps || !caps.zoom || !videoTrack || !(caps.zoom.max > caps.zoom.min)) { wrap.hidden = true; return; }
     range.min = caps.zoom.min; range.max = caps.zoom.max; range.step = caps.zoom.step || 0.1;
-    // Default to ~2x. The web camera's autofocus is weak/absent on some phones
-    // (Huawei/Honor), so barcodes go blurry when the phone is held close. Zooming in
-    // lets staff hold the phone ~25-30 cm back — past the lens's near-focus limit,
-    // where the image is sharp — while the barcode still fills the reticle.
-    if (!zoomApplied) {
-      zoomApplied = true;
-      var target = Math.min(2, caps.zoom.max);
-      if (target > caps.zoom.min) {
-        try { videoTrack.applyConstraints({ advanced: [{ zoom: target }] }).catch(function () {}); } catch (e) {}
-        range.value = target;
-      } else {
-        range.value = (videoTrack.getSettings && videoTrack.getSettings().zoom) || caps.zoom.min;
-      }
-    } else {
-      range.value = (videoTrack.getSettings && videoTrack.getSettings().zoom) || caps.zoom.min;
-    }
+    // Leave zoom at the camera's default. We do NOT auto-zoom: on single-lens phones
+    // "zoom" is DIGITAL (crop + upscale), which makes an already-soft preview blurrier.
+    range.value = (videoTrack.getSettings && videoTrack.getSettings().zoom) || caps.zoom.min;
     wrap.hidden = false;
     range.oninput = function () {
       try { videoTrack.applyConstraints({ advanced: [{ zoom: Number(range.value) }] }).catch(function () {}); } catch (e) {}
@@ -438,8 +424,54 @@
         // still honour it — try unconditionally instead of giving up.
         videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
       }
-      flashToast('Refocusing…');
     } catch (e) {}
+  }
+
+  // Capture a STILL photo and decode that, instead of the live preview. On phones
+  // whose preview stream never autofocuses (seen on Huawei/Honor in Chrome — blurry
+  // at every distance), the still-capture pipeline runs the camera's real autofocus,
+  // so the photo is sharp even when the preview isn't. This is the reliable path for
+  // those phones; the continuous preview decode still handles everything else.
+  var capturing = false;
+  function captureAndDecode() {
+    if (!videoTrack || capturing) return;
+    capturing = true;
+    refocus();                       // nudge AF first; takePhoto also focuses
+    flashToast('Focusing…');
+
+    function decodeBitmap(bitmap) {
+      if (!bitmap) throw new Error('no frame');
+      var D = window.BarcodeDetector;
+      if (D) {
+        var det = new D({ formats: ['ean_13', 'code_128', 'ean_8', 'upc_a', 'qr_code'] });
+        return det.detect(bitmap).then(function (codes) {
+          if (codes && codes.length) { onScan(codes[0].rawValue); return true; }
+          return false;
+        });
+      }
+      // No detector available (shouldn't happen — polyfill loads one) → let html5-qrcode keep trying.
+      return Promise.resolve(false);
+    }
+
+    // Prefer takePhoto() (full-res, properly focused still); fall back to grabFrame().
+    var ic = (window.ImageCapture && videoTrack) ? new window.ImageCapture(videoTrack) : null;
+    var got;
+    if (ic && ic.takePhoto) {
+      // Give AF ~600ms to settle after the refocus nudge before the shot.
+      got = new Promise(function (res) { setTimeout(res, 600); })
+        .then(function () { return ic.takePhoto(); })
+        .then(function (blob) { return createImageBitmap(blob); })
+        .catch(function () { return ic.grabFrame ? ic.grabFrame() : null; });
+    } else if (ic && ic.grabFrame) {
+      got = new Promise(function (res) { setTimeout(res, 600); }).then(function () { return ic.grabFrame(); });
+    } else {
+      got = Promise.resolve(null);
+    }
+
+    got.then(decodeBitmap)
+      .then(function (found) { if (!found) flashToast('No barcode — hold steady, tap again'); })
+      .catch(function () { flashToast('Could not capture — tap again'); })
+      .finally(function () { capturing = false; });
   }
 
   function stopScanner() {
@@ -448,7 +480,6 @@
     }
     scanning = false;
     videoTrack = null;
-    zoomApplied = false;
     var vf = $('viewfinder'); if (vf) vf.classList.remove('live');
     var zw = $('zoom-wrap'); if (zw) zw.hidden = true;
     var t = $('scan-toggle'); if (t) t.textContent = 'Start camera';
@@ -458,9 +489,10 @@
     ensureAudio();   // unlock sound on this user gesture (needed for iOS)
     if (scanning) stopScanner(); else startScanner();
   });
-  // tapping the viewfinder (re)starts the camera if stopped, or forces a refocus
-  // while running — handy for a barcode the lens won't lock onto.
-  $('viewfinder').addEventListener('click', function () { ensureAudio(); if (!scanning) startScanner(); else refocus(); });
+  // Tapping the viewfinder (re)starts the camera if stopped; while running it takes a
+  // sharp still and decodes it — the reliable path for phones whose live preview won't
+  // autofocus. (Phones that DO focus still auto-read continuously without any tap.)
+  $('viewfinder').addEventListener('click', function () { ensureAudio(); if (!scanning) startScanner(); else captureAndDecode(); });
 
   function onScan(decoded) {
     var now = Date.now();

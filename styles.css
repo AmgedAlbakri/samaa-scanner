@@ -104,6 +104,14 @@ textarea.input{resize:vertical; min-height:64px}
   color:rgba(255,255,255,.85); font-weight:600; font-size:15px; text-align:center; padding:20px;
 }
 .viewfinder-card.live .tap-hint{display:none}
+/* Persistent capture hint, shown only while the camera is live. */
+.live-hint{
+  position:absolute; left:50%; top:10px; transform:translateX(-50%);
+  background:rgba(26,26,26,.72); color:rgba(255,255,255,.92);
+  font-size:12px; font-weight:600; padding:5px 12px; border-radius:999px;
+  white-space:nowrap; pointer-events:none; display:none;
+}
+.viewfinder-card.live .live-hint{display:block}
 .scan-toast{
   position:absolute; left:50%; bottom:14px; transform:translateX(-50%);
   background:rgba(26,26,26,.92); color:#fff; padding:8px 16px; border-radius:999px;
