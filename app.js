@@ -272,8 +272,11 @@
       if (!vids.length) return null;
       var back = vids.filter(function (d) { return /back|rear|environment|arrière|trasera|背面/i.test(d.label); });
       var pool = back.length ? back : vids;
-      // Drop the specialty lenses; keep only a plain main camera if one remains.
-      var special = /wide|ultra|tele|zoom|depth|macro|mono|true ?depth|front/i;
+      // Drop only the lenses that are useless for close barcodes: ULTRA-wide,
+      // telephoto, and the fixed-focus depth/macro/mono sensors. We deliberately do
+      // NOT drop plain "wide" — on most phones the MAIN camera is the wide one, and
+      // excluding it was picking a fixed-focus auxiliary sensor (the blur in ErrorV2).
+      var special = /ultra|tele|zoom|depth|macro|mono|infrared|\bir\b|front/i;
       var main = pool.filter(function (d) { return !special.test(d.label); });
       var chosen = main[0] || pool[0];
       return chosen ? chosen.deviceId : null;
@@ -322,9 +325,11 @@
       .then(function (id) {
         pickedCameraId = id;
         var source = id ? { deviceId: { exact: id } } : { facingMode: 'environment' };
-        // We do NOT put resolution/focusMode in the start constraints (some devices
-        // reject the whole request and the camera never opens). Focus + zoom are
-        // applied AFTER the stream is live in applyFocusTweaks().
+        // focusMode goes in `advanced` (best-effort, never causes the request to be
+        // rejected) — some Huawei/Honor browsers only honour continuous autofocus when
+        // it's asked for at acquisition, not via a later applyConstraints(). Resolution
+        // is still applied AFTER the stream is live, where it can't block opening.
+        source.advanced = [{ focusMode: 'continuous' }];
         return qr.start(source, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
           .catch(function (err) {
             // An exact deviceId can be over-constrained on some phones; retry loose.
@@ -389,13 +394,28 @@
 
   // Optical/digital zoom slider — only shown when the camera reports a zoom range.
   // Lets staff read small or far-away barcodes without walking up to them.
+  var zoomApplied = false;   // only auto-zoom once per camera session
   function setupZoom(caps) {
     var wrap = $('zoom-wrap'), range = $('zoom-range');
     if (!wrap || !range) return;
     if (!caps || !caps.zoom || !videoTrack || !(caps.zoom.max > caps.zoom.min)) { wrap.hidden = true; return; }
     range.min = caps.zoom.min; range.max = caps.zoom.max; range.step = caps.zoom.step || 0.1;
-    var cur = (videoTrack.getSettings && videoTrack.getSettings().zoom) || caps.zoom.min;
-    range.value = cur;
+    // Default to ~2x. The web camera's autofocus is weak/absent on some phones
+    // (Huawei/Honor), so barcodes go blurry when the phone is held close. Zooming in
+    // lets staff hold the phone ~25-30 cm back — past the lens's near-focus limit,
+    // where the image is sharp — while the barcode still fills the reticle.
+    if (!zoomApplied) {
+      zoomApplied = true;
+      var target = Math.min(2, caps.zoom.max);
+      if (target > caps.zoom.min) {
+        try { videoTrack.applyConstraints({ advanced: [{ zoom: target }] }).catch(function () {}); } catch (e) {}
+        range.value = target;
+      } else {
+        range.value = (videoTrack.getSettings && videoTrack.getSettings().zoom) || caps.zoom.min;
+      }
+    } else {
+      range.value = (videoTrack.getSettings && videoTrack.getSettings().zoom) || caps.zoom.min;
+    }
     wrap.hidden = false;
     range.oninput = function () {
       try { videoTrack.applyConstraints({ advanced: [{ zoom: Number(range.value) }] }).catch(function () {}); } catch (e) {}
@@ -428,6 +448,7 @@
     }
     scanning = false;
     videoTrack = null;
+    zoomApplied = false;
     var vf = $('viewfinder'); if (vf) vf.classList.remove('live');
     var zw = $('zoom-wrap'); if (zw) zw.hidden = true;
     var t = $('scan-toggle'); if (t) t.textContent = 'Start camera';
