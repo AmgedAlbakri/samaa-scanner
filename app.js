@@ -1112,7 +1112,19 @@
   //  BOOT
   // ════════════════════════════════════════════════════════════════════════
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+    // Auto-reload once when a NEW service worker takes control, so a deploy lands on
+    // the phone without anyone manually clearing the cache. Only on UPDATES (a
+    // controller already existed) — never on the very first install.
+    var hadController = !!navigator.serviceWorker.controller;
+    var reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (hadController && !reloading) { reloading = true; window.location.reload(); }
+    });
+    // updateViaCache:'none' → the browser never serves sw.js from its HTTP cache, so a
+    // new service worker is detected immediately on every load.
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
+    });
   }
   if (token && user) enterApp(); else routeUnauthed();
 

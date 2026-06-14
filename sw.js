@@ -1,9 +1,11 @@
 /* SAMAA MAJU Scanner — service worker
- * Caches the app shell so the PWA installs and the UI opens offline.
- * API calls (cross-origin POST to Apps Script) are always network-only —
- * we never cache product/login responses.
+ * NETWORK-FIRST for the app shell: staff always get the latest code when online,
+ * and the cache is only a fallback so the UI still opens offline. (The old
+ * cache-first strategy served stale code for days — every deploy "looked the same"
+ * on the phones because the cached app.js never got replaced.)
+ * API calls (cross-origin POST to Apps Script) are always network-only — never cached.
  */
-var CACHE = 'samaa-scanner-v18';
+var CACHE = 'samaa-scanner-v19';
 var SHELL = [
   './',
   './index.html',
@@ -21,9 +23,12 @@ var SHELL = [
 self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(CACHE).then(function (c) {
-      // addAll fails the whole install if one file is missing; add individually to be resilient.
+      // Fetch each shell file with {cache:'reload'} so the browser's HTTP cache can't
+      // hand us a STALE copy to store — the new cache always gets the freshest files.
       return Promise.all(SHELL.map(function (url) {
-        return c.add(url).catch(function () { /* ignore a single missing asset */ });
+        return fetch(new Request(url, { cache: 'reload' }))
+          .then(function (res) { if (res && res.ok) return c.put(url, res); })
+          .catch(function () { /* ignore a single missing/unfetchable asset */ });
       }));
     }).then(function () { return self.skipWaiting(); })
   );
@@ -41,21 +46,21 @@ self.addEventListener('activate', function (e) {
 
 self.addEventListener('fetch', function (e) {
   var req = e.request;
-  // Only handle same-origin GET requests from the cache. Everything else
-  // (POSTs to the Apps Script Web App, CDN scripts) goes straight to network.
+  // Only handle same-origin GET. Everything else (POSTs to Apps Script, CDN scripts)
+  // goes straight to the network untouched.
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) {
     return;
   }
+  // NETWORK-FIRST: try the network, update the cache with the fresh response, and only
+  // fall back to the cache when offline. This guarantees the phones run the latest code.
   e.respondWith(
-    caches.match(req).then(function (cached) {
-      if (cached) return cached;
-      return fetch(req).then(function (res) {
-        // Cache newly fetched same-origin assets (e.g. first visit).
-        var copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put(req, copy); }).catch(function () {});
-        return res;
-      }).catch(function () {
-        // Offline and not cached — fall back to the shell for navigations.
+    fetch(req).then(function (res) {
+      var copy = res.clone();
+      caches.open(CACHE).then(function (c) { c.put(req, copy); }).catch(function () {});
+      return res;
+    }).catch(function () {
+      return caches.match(req).then(function (cached) {
+        if (cached) return cached;
         if (req.mode === 'navigate') return caches.match('./index.html');
       });
     })
