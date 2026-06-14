@@ -344,30 +344,34 @@
         });
     }
 
-    // iOS: do NOT call resolveCamera() — its enumerateDevices()/throwaway getUserMedia()
-    // is an extra async hop that makes Safari drop the tap's "user activation", so the
-    // real camera open then throws NotAllowedError and looks like a denied permission
-    // even after the user allowed it. iPhones have one logical back camera, so a plain
-    // facingMode request inside the gesture is both correct and reliable. Android keeps
-    // the main-lens resolution (cached after the first run).
-    var prep = IS_IOS ? Promise.resolve(null)
-                      : (pickedCameraId ? Promise.resolve(pickedCameraId) : resolveCamera());
-    prep
-      .then(function (id) {
-        pickedCameraId = IS_IOS ? null : id;
-        var source = (id && !IS_IOS) ? { deviceId: { exact: id } } : { facingMode: 'environment' };
-        // focusMode goes in `advanced` (best-effort, never causes the request to be
-        // rejected) — some Huawei/Honor browsers only honour continuous autofocus when
-        // it's asked for at acquisition, not via a later applyConstraints(). Resolution
-        // is still applied AFTER the stream is live, where it can't block opening.
-        source.advanced = [{ focusMode: 'continuous' }];
-        return tryStart(source);
-      })
+    // CRITICAL — open the camera DIRECTLY inside this tap, on every platform. Calling
+    // enumerateDevices()/getUserMedia() first (to pick the "main lens") consumes the
+    // tap's transient user-activation; Chrome (Android) and Safari (iOS) then reject the
+    // real open with NotAllowedError when the permission is still in the "ask" state —
+    // which looks exactly like a denied permission even though the user never denied it.
+    // So: open first with a plain facingMode request, resolve the better lens LATER.
+    //
+    // On a 2nd+ start in the same session the permission is already granted, so the
+    // cached main-lens deviceId (Android) is safe to use straight away.
+    var source = (!IS_IOS && pickedCameraId)
+      ? { deviceId: { exact: pickedCameraId } }
+      : { facingMode: 'environment' };
+    // focusMode goes in `advanced` (best-effort, never causes the request to be
+    // rejected). Resolution is applied AFTER the stream is live, where it can't block.
+    source.advanced = [{ focusMode: 'continuous' }];
+    tryStart(source)
       .then(function () {
         scanning = true; starting = false;
         $('viewfinder').classList.add('live');
         $('scan-toggle').textContent = 'Stop camera';
         applyFocusTweaks();
+        // Permission is granted and a stream is live → now it's safe to find the best
+        // rear lens (labels are populated, so resolveCamera won't open a throwaway
+        // stream) and cache it for the NEXT start. We do NOT restart the current stream,
+        // so there's no flicker; the optimal lens just kicks in next time (Android only).
+        if (!IS_IOS && !pickedCameraId) {
+          resolveCamera().then(function (id) { if (id) pickedCameraId = id; }).catch(function () {});
+        }
       })
       .catch(function (err) {
         starting = false;
@@ -385,7 +389,7 @@
     if (!window.isSecureContext)
       return 'Camera needs a secure (https) connection — open the app via its https link.';
     if (n === 'NotAllowedError' || n === 'SecurityError')
-      return 'Camera is blocked for this site. Open the browser site settings (lock/“aA” icon in the address bar) → allow Camera → reload.';
+      return 'Camera blocked. In Chrome: tap the icon left of the web address → Permissions → Camera → Allow, then reload. (Also check Android Settings → Apps → Chrome → Permissions → Camera.)';
     if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError')
       return 'Camera is busy — close other apps/tabs using it, then tap Start camera again.';
     if (n === 'NotFoundError' || n === 'OverconstrainedError')
