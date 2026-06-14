@@ -327,18 +327,32 @@
     // label-unlock stream is released, or when another tab/app held it) throws on the
     // first try but succeeds ~0.7s later. We also fall back from an exact deviceId to
     // a loose facingMode request.
+    // Ensure html5-qrcode is in a clean (NOT_STARTED) state before each (re)start.
+    // Calling start() again while it's still SCANNING/PAUSED — e.g. after a failed
+    // start, or a retry below — throws a non-camera "Cannot transition to a new state"
+    // string error, which is exactly what produced "Cannot open camera" with no cause.
+    // getState(): 1=NOT_STARTED, 2=SCANNING, 3=PAUSED. The clean path resolves the
+    // Promise synchronously (a microtask), so the tap's user-activation is preserved.
+    function safeStart(source) {
+      var pre = Promise.resolve();
+      try {
+        var st = qr.getState ? qr.getState() : 1;
+        if (st === 2 || st === 3) pre = qr.stop().then(function () { try { qr.clear(); } catch (e) {} }).catch(function () {});
+      } catch (e) {}
+      return pre.then(function () { return qr.start(source, cfg, onScan, function () { /* per-frame misses: ignore */ }); });
+    }
+
     function tryStart(source) {
-      return qr.start(source, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
+      return safeStart(source)
         .catch(function (err) {
           var n = err && err.name;
           if (source.deviceId && (n === 'OverconstrainedError' || n === 'NotFoundError' || n === 'NotReadableError')) {
             pickedCameraId = null;
             return new Promise(function (r) { setTimeout(r, 500); })
-              .then(function () { return qr.start({ facingMode: 'environment', advanced: [{ focusMode: 'continuous' }] }, cfg, onScan, function () {}); });
+              .then(function () { return safeStart({ facingMode: 'environment', advanced: [{ focusMode: 'continuous' }] }); });
           }
           if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError') {
-            return new Promise(function (r) { setTimeout(r, 700); })
-              .then(function () { return qr.start(source, cfg, onScan, function () {}); });
+            return new Promise(function (r) { setTimeout(r, 700); }).then(function () { return safeStart(source); });
           }
           throw err;
         });
@@ -394,7 +408,8 @@
       return 'Camera is busy — close other apps/tabs using it, then tap Start camera again.';
     if (n === 'NotFoundError' || n === 'OverconstrainedError')
       return 'No usable camera found — reload the page and try again.';
-    return 'Cannot open camera' + (n ? ' [' + n + ']' : '') + ' — reload and try again.';
+    var detail = n || (err && err.message) || (typeof err === 'string' ? err : '');
+    return 'Cannot open camera' + (detail ? ' [' + String(detail).slice(0, 90) + ']' : '') + ' — reload and try again.';
   }
 
   // Grab the live video track and (re-)assert continuous autofocus. Some Android
