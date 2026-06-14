@@ -322,23 +322,46 @@
       disableFlip: true
     };
 
-    // Resolve the main lens first (cached after the first run), then start. If we
-    // can't determine one, fall back to facingMode:'environment' — the old behaviour.
-    (pickedCameraId ? Promise.resolve(pickedCameraId) : resolveCamera())
+    // Open the camera with one delayed retry: a deviceId that's over-constrained or a
+    // camera that's momentarily "busy" (NotReadable/Abort — common right after the
+    // label-unlock stream is released, or when another tab/app held it) throws on the
+    // first try but succeeds ~0.7s later. We also fall back from an exact deviceId to
+    // a loose facingMode request.
+    function tryStart(source) {
+      return qr.start(source, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
+        .catch(function (err) {
+          var n = err && err.name;
+          if (source.deviceId && (n === 'OverconstrainedError' || n === 'NotFoundError' || n === 'NotReadableError')) {
+            pickedCameraId = null;
+            return new Promise(function (r) { setTimeout(r, 500); })
+              .then(function () { return qr.start({ facingMode: 'environment', advanced: [{ focusMode: 'continuous' }] }, cfg, onScan, function () {}); });
+          }
+          if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError') {
+            return new Promise(function (r) { setTimeout(r, 700); })
+              .then(function () { return qr.start(source, cfg, onScan, function () {}); });
+          }
+          throw err;
+        });
+    }
+
+    // iOS: do NOT call resolveCamera() — its enumerateDevices()/throwaway getUserMedia()
+    // is an extra async hop that makes Safari drop the tap's "user activation", so the
+    // real camera open then throws NotAllowedError and looks like a denied permission
+    // even after the user allowed it. iPhones have one logical back camera, so a plain
+    // facingMode request inside the gesture is both correct and reliable. Android keeps
+    // the main-lens resolution (cached after the first run).
+    var prep = IS_IOS ? Promise.resolve(null)
+                      : (pickedCameraId ? Promise.resolve(pickedCameraId) : resolveCamera());
+    prep
       .then(function (id) {
-        pickedCameraId = id;
-        var source = id ? { deviceId: { exact: id } } : { facingMode: 'environment' };
+        pickedCameraId = IS_IOS ? null : id;
+        var source = (id && !IS_IOS) ? { deviceId: { exact: id } } : { facingMode: 'environment' };
         // focusMode goes in `advanced` (best-effort, never causes the request to be
         // rejected) — some Huawei/Honor browsers only honour continuous autofocus when
         // it's asked for at acquisition, not via a later applyConstraints(). Resolution
         // is still applied AFTER the stream is live, where it can't block opening.
         source.advanced = [{ focusMode: 'continuous' }];
-        return qr.start(source, cfg, onScan, function () { /* per-frame decode misses: ignore */ })
-          .catch(function (err) {
-            // An exact deviceId can be over-constrained on some phones; retry loose.
-            if (id) { pickedCameraId = null; return qr.start({ facingMode: 'environment' }, cfg, onScan, function () {}); }
-            throw err;
-          });
+        return tryStart(source);
       })
       .then(function () {
         scanning = true; starting = false;
@@ -349,10 +372,25 @@
       .catch(function (err) {
         starting = false;
         $('tap-hint').textContent = 'Tap to start the camera';
-        var en = (err && (err.name || err.message)) ? (' [' + (err.name || err.message) + ']') : '';
-        toast('Cannot open camera' + en + ' — allow camera access.', true);
+        toast(cameraErrText(err), true);
         console.warn('camera start failed', err);
       });
+  }
+
+  // Turn a getUserMedia error into a message that says what's ACTUALLY wrong, instead
+  // of always blaming permissions (which sent staff in circles re-allowing a camera
+  // they'd already allowed). NotAllowed = truly blocked; NotReadable = busy; etc.
+  function cameraErrText(err) {
+    var n = (err && err.name) || '';
+    if (!window.isSecureContext)
+      return 'Camera needs a secure (https) connection — open the app via its https link.';
+    if (n === 'NotAllowedError' || n === 'SecurityError')
+      return 'Camera is blocked for this site. Open the browser site settings (lock/“aA” icon in the address bar) → allow Camera → reload.';
+    if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError')
+      return 'Camera is busy — close other apps/tabs using it, then tap Start camera again.';
+    if (n === 'NotFoundError' || n === 'OverconstrainedError')
+      return 'No usable camera found — reload the page and try again.';
+    return 'Cannot open camera' + (n ? ' [' + n + ']' : '') + ' — reload and try again.';
   }
 
   // Grab the live video track and (re-)assert continuous autofocus. Some Android
