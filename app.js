@@ -315,7 +315,10 @@
         var bw = Math.floor(Math.min(w * 0.8, w));
         return { width: bw, height: Math.floor(Math.min(h * 0.45, bw * 0.62)) };
       },
-      aspectRatio: 1.0,
+      // No aspectRatio: 1.0 — forcing a square stream makes the camera crop the
+      // sensor (a zoomed, lower-res image). Let it deliver its native (wider) frame;
+      // we size the viewfinder to match the real frame in fitViewfinder() so the
+      // preview shows the full field of view, exactly like the native camera app.
       disableFlip: true
     };
 
@@ -368,7 +371,25 @@
       applyFocusAndRes(caps);
       setTimeout(function () { applyFocusAndRes(caps); }, 1200);
       setupZoom(caps);
+      fitViewfinder();
     } catch (e) {}
+  }
+
+  // Size the viewfinder box to the camera's ACTUAL frame ratio. The preview <video>
+  // uses object-fit:cover; in a fixed square box that center-crops ~40% off a 16:9
+  // stream — the "zoomed in" complaint. Matching the box to videoWidth/videoHeight
+  // makes cover crop nothing, so the preview shows the full field of view like the
+  // native camera. Runs on loadedmetadata too, since dimensions arrive a beat late.
+  function fitViewfinder() {
+    var video = document.querySelector('#reader video');
+    var card  = document.querySelector('.viewfinder-card');
+    if (!video || !card) return;
+    function apply() {
+      var w = video.videoWidth, h = video.videoHeight;
+      if (w && h) card.style.aspectRatio = w + ' / ' + h;
+    }
+    apply();
+    video.addEventListener('loadedmetadata', apply, { once: true });
   }
 
   // Apply continuous focus (+720p) in ONE call so resolution doesn't reset focus.
@@ -399,9 +420,13 @@
     if (!wrap || !range) return;
     if (!caps || !caps.zoom || !videoTrack || !(caps.zoom.max > caps.zoom.min)) { wrap.hidden = true; return; }
     range.min = caps.zoom.min; range.max = caps.zoom.max; range.step = caps.zoom.step || 0.1;
-    // Leave zoom at the camera's default. We do NOT auto-zoom: on single-lens phones
-    // "zoom" is DIGITAL (crop + upscale), which makes an already-soft preview blurrier.
-    range.value = (videoTrack.getSettings && videoTrack.getSettings().zoom) || caps.zoom.min;
+    // Force the WIDEST zoom (caps.zoom.min, normally 1×). Some phones hand back a
+    // camera whose default zoom is already >1 (a cropped, soft, "zoomed-in" preview);
+    // resetting to min gives the full field of view and the sharpest image. Staff can
+    // still slide up to zoom in on small/far barcodes. "Zoom" is DIGITAL on single-lens
+    // phones (crop + upscale), so min is always the cleanest starting point.
+    range.value = caps.zoom.min;
+    try { videoTrack.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] }).catch(function () {}); } catch (e) {}
     wrap.hidden = false;
     range.oninput = function () {
       try { videoTrack.applyConstraints({ advanced: [{ zoom: Number(range.value) }] }).catch(function () {}); } catch (e) {}
@@ -465,7 +490,18 @@
     } else if (ic && ic.grabFrame) {
       got = new Promise(function (res) { setTimeout(res, 600); }).then(function () { return ic.grabFrame(); });
     } else {
-      got = Promise.resolve(null);
+      // No ImageCapture API — this is EVERY iPhone (Safari never shipped it). Grab the
+      // current frame off the live <video> onto a canvas instead. BarcodeDetector (the
+      // ZXing polyfill on iOS) decodes a canvas directly, so tap-to-capture works here
+      // too. Wait ~600ms first so the refocus() nudge above has time to sharpen.
+      got = new Promise(function (res) { setTimeout(res, 600); }).then(function () {
+        var video = document.querySelector('#reader video');
+        if (!video || !video.videoWidth) return null;
+        var cv = document.createElement('canvas');
+        cv.width = video.videoWidth; cv.height = video.videoHeight;
+        cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
+        return cv;
+      });
     }
 
     got.then(decodeBitmap)
@@ -480,6 +516,7 @@
     }
     scanning = false;
     videoTrack = null;
+    var card = document.querySelector('.viewfinder-card'); if (card) card.style.aspectRatio = '';
     var vf = $('viewfinder'); if (vf) vf.classList.remove('live');
     var zw = $('zoom-wrap'); if (zw) zw.hidden = true;
     var t = $('scan-toggle'); if (t) t.textContent = 'Start camera';
@@ -493,6 +530,22 @@
   // sharp still and decodes it — the reliable path for phones whose live preview won't
   // autofocus. (Phones that DO focus still auto-read continuously without any tap.)
   $('viewfinder').addEventListener('click', function () { ensureAudio(); if (!scanning) startScanner(); else captureAndDecode(); });
+
+  // When the phone rotates, the video frame's dimensions swap — re-fit the viewfinder
+  // (so it doesn't suddenly center-crop) and re-assert autofocus a beat later, once the
+  // new orientation has settled. Guarded so it's a no-op while the camera is stopped.
+  var orientTimer = null;
+  function onOrientationChange() {
+    if (!scanning) return;
+    if (orientTimer) clearTimeout(orientTimer);
+    orientTimer = setTimeout(function () {
+      orientTimer = null;
+      try { fitViewfinder(); } catch (e) {}
+      try { var caps = videoTrack && videoTrack.getCapabilities ? videoTrack.getCapabilities() : {}; applyFocusAndRes(caps); } catch (e) {}
+    }, 400);
+  }
+  window.addEventListener('orientationchange', onOrientationChange);
+  window.addEventListener('resize', onOrientationChange);
 
   function onScan(decoded) {
     var now = Date.now();
