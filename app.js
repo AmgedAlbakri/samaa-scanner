@@ -254,6 +254,9 @@
   var starting = false;
   var videoTrack = null;
   var pickedCameraId = null;   // cached main-lens deviceId, resolved once per load
+  var detectTimer = null;      // native-scanner BarcodeDetector loop handle
+  var nativeStream = null;     // native-scanner MediaStream (so we can stop its tracks)
+  var usingNative = false;     // true while the native getUserMedia+BarcodeDetector path is live
 
   // Pick the MAIN rear lens. Android phones expose several physical back cameras
   // (main / ultra-wide / telephoto / macro / depth). facingMode:'environment' lets
@@ -295,9 +298,16 @@
 
   function startScanner() {
     if (scanning || starting) return;
-    if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); return; }
-
     starting = true;
+
+    // Native-app path: html5-qrcode renders a BLACK preview and gets stuck in
+    // "transition" errors inside the Android WebView, but raw getUserMedia + the
+    // WebView's built-in BarcodeDetector are reliable (the on-device probe proved both
+    // work). Use our own video + detector loop there. Browsers/PWA — where html5-qrcode
+    // works and is needed for iOS (no BarcodeDetector) — keep the proven path below.
+    if (window.Capacitor && ('BarcodeDetector' in window)) { startNativeScanner(); return; }
+
+    if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); starting = false; return; }
     function makeScanner() {
       return new Html5Qrcode('reader', {
         formatsToSupport: supportedFormats(),
@@ -408,6 +418,59 @@
         toast(cameraErrText(err), true);
         console.warn('camera start failed', err);
       });
+  }
+
+  // Native-app scanner: own <video> + the WebView's BarcodeDetector. No html5-qrcode,
+  // so none of its WebView rendering/state problems apply. Reuses the same videoTrack
+  // helpers (focus, zoom, fit) and the same onScan() handler as the browser path.
+  function startNativeScanner() {
+    var constraints = { audio: false, video: { facingMode: { ideal: 'environment' }, advanced: [{ focusMode: 'continuous' }] } };
+    navigator.mediaDevices.getUserMedia(constraints)
+      .then(function (stream) {
+        nativeStream = stream;
+        videoTrack = (stream.getVideoTracks && stream.getVideoTracks()[0]) || null;
+        var reader = $('reader');
+        reader.innerHTML = '';
+        var v = document.createElement('video');
+        v.setAttribute('playsinline', ''); v.muted = true; v.autoplay = true;
+        v.style.cssText = 'width:100%;height:100%;object-fit:cover';
+        reader.appendChild(v);
+        v.srcObject = stream;
+        return v.play().catch(function () {}).then(function () { return v; });
+      })
+      .then(function (v) {
+        usingNative = true; scanning = true; starting = false;
+        $('viewfinder').classList.add('live');
+        $('scan-toggle').textContent = 'Stop camera';
+        var caps = (videoTrack && videoTrack.getCapabilities) ? videoTrack.getCapabilities() : {};
+        try { applyFocusAndRes(caps); } catch (e) {}
+        try { setupZoom(caps); } catch (e) {}
+        try { fitViewfinder(); } catch (e) {}
+        startDetectLoop(v);
+      })
+      .catch(function (err) {
+        starting = false; usingNative = false;
+        $('tap-hint').textContent = 'Tap to start the camera';
+        toast(cameraErrText(err), true);
+        console.warn('native camera start failed', err);
+      });
+  }
+
+  function startDetectLoop(video) {
+    var detector;
+    try { detector = new window.BarcodeDetector({ formats: ['ean_13', 'code_128', 'ean_8', 'upc_a', 'qr_code'] }); }
+    catch (e) { detector = new window.BarcodeDetector(); }
+    clearTimeout(detectTimer);
+    function tick() {
+      if (!scanning || !usingNative) return;
+      try {
+        detector.detect(video)
+          .then(function (codes) { if (codes && codes.length) onScan(codes[0].rawValue); })
+          .catch(function () {});
+      } catch (e) {}
+      detectTimer = setTimeout(tick, 160);  // ~6 scans/sec — BarcodeDetector is native/fast
+    }
+    detectTimer = setTimeout(tick, 300);
   }
 
   // Turn a getUserMedia error into a message that says what's ACTUALLY wrong, instead
@@ -583,7 +646,13 @@
   }
 
   function stopScanner() {
-    if (qr && scanning) {
+    if (usingNative) {
+      // Native path: stop the detector loop, release the camera, drop the video element.
+      clearTimeout(detectTimer); detectTimer = null;
+      try { if (nativeStream) nativeStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      nativeStream = null; usingNative = false;
+      var reader = $('reader'); if (reader) reader.innerHTML = '';
+    } else if (qr && scanning) {
       try { qr.stop().then(function () { try { qr.clear(); } catch (e) {} }).catch(function () {}); } catch (e) {}
     }
     scanning = false;
