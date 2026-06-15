@@ -310,9 +310,20 @@
           .then(function (s) {
             var t = (s.getVideoTracks && s.getVideoTracks()[0]) || null;
             var st = (t && t.getSettings) ? t.getSettings() : {};
-            hint.textContent = 'Camera OK: ' + (st.width || '?') + 'x' + (st.height || '?') + ' — tap again to scan';
+            hint.textContent = 'Camera OK ' + (st.width || '?') + 'x' + (st.height || '?') + ' — test video (top) 8s';
             toast('Raw camera OK ' + (st.width || '?') + 'x' + (st.height || '?'), false);
-            setTimeout(function () { try { s.getTracks().forEach(function (x) { x.stop(); }); } catch (e) {} }, 1200);
+            // Show the stream in an UNCLIPPED full-width video at the top of the screen
+            // (no border-radius/overflow parent). If THIS shows the camera, the black
+            // preview is caused by the clipped .viewfinder-card; if it's also black, the
+            // WebView can't composite a camera <video> at all (needs a canvas approach).
+            var v = document.createElement('video');
+            v.setAttribute('playsinline', ''); v.muted = true; v.autoplay = true;
+            v.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:45vh;object-fit:cover;z-index:99999;background:#000';
+            document.body.appendChild(v);
+            v.srcObject = s;
+            var p = v.play();
+            if (p && p.catch) p.catch(function (e) { toast('video.play err: ' + (e && e.name), true); });
+            setTimeout(function () { try { s.getTracks().forEach(function (x) { x.stop(); }); v.remove(); } catch (e) {} }, 8000);
           })
           .catch(function (e) {
             hint.textContent = 'Camera FAILED: ' + (e && e.name);
