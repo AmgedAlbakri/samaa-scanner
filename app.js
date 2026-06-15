@@ -424,7 +424,17 @@
   // so none of its WebView rendering/state problems apply. Reuses the same videoTrack
   // helpers (focus, zoom, fit) and the same onScan() handler as the browser path.
   function startNativeScanner() {
-    var constraints = { audio: false, video: { facingMode: { ideal: 'environment' }, advanced: [{ focusMode: 'continuous' }] } };
+    // 4:3 capture = WIDEST field of view (16:9 crops the sensor top/bottom and looks
+    // zoomed). Resolution high enough for small EAN-13 bars. focusMode in advanced is
+    // best-effort. Zoom is forced to widest after the stream is live (nativeCamTweaks).
+    var constraints = {
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 }, height: { ideal: 960 },
+        advanced: [{ focusMode: 'continuous' }]
+      }
+    };
     navigator.mediaDevices.getUserMedia(constraints)
       .then(function (stream) {
         nativeStream = stream;
@@ -433,7 +443,10 @@
         reader.innerHTML = '';
         var v = document.createElement('video');
         v.setAttribute('playsinline', ''); v.muted = true; v.autoplay = true;
-        v.style.cssText = 'width:100%;height:100%;object-fit:cover';
+        v.style.cssText = 'width:100%;height:100%';
+        // Show the WHOLE camera frame (no cover-crop, which was the apparent "zoom").
+        // setProperty/important beats the global `.reader video{object-fit:cover!important}`.
+        v.style.setProperty('object-fit', 'contain', 'important');
         reader.appendChild(v);
         v.srcObject = stream;
         return v.play().catch(function () {}).then(function () { return v; });
@@ -443,9 +456,10 @@
         $('viewfinder').classList.add('live');
         $('scan-toggle').textContent = 'Stop camera';
         var caps = (videoTrack && videoTrack.getCapabilities) ? videoTrack.getCapabilities() : {};
-        try { applyFocusAndRes(caps); } catch (e) {}
+        nativeCamTweaks();                                   // widest zoom + continuous focus
+        setTimeout(nativeCamTweaks, 1200);                   // re-assert after warm-up
+        setTimeout(nativeCamTweaks, 2500);
         try { setupZoom(caps); } catch (e) {}
-        try { fitViewfinder(); } catch (e) {}
         startDetectLoop(v);
       })
       .catch(function (err) {
@@ -454,6 +468,21 @@
         toast(cameraErrText(err), true);
         console.warn('native camera start failed', err);
       });
+  }
+
+  // Force the camera to its WIDEST view (zoom = min, normally 1×) and continuous
+  // autofocus. Unconditional + best-effort: some phones don't advertise zoom/focus in
+  // getCapabilities() but still honour the constraint, so we try regardless.
+  function nativeCamTweaks() {
+    if (!videoTrack || !videoTrack.applyConstraints) return;
+    var caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+    var adv = [{ focusMode: 'continuous' }];
+    var z = (caps && caps.zoom && typeof caps.zoom.min === 'number') ? caps.zoom.min : 1;
+    adv.push({ zoom: z });
+    videoTrack.applyConstraints({ advanced: adv }).catch(function () {
+      // zoom not accepted → at least keep continuous focus
+      videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+    });
   }
 
   function startDetectLoop(video) {
