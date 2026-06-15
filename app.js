@@ -296,6 +296,32 @@
   function startScanner() {
     if (scanning || starting) return;
     if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); return; }
+
+    // TEMP diagnostic — runs ONLY inside the native app (window.Capacitor exists there,
+    // never in a normal browser/PWA). The first tap runs a raw getUserMedia probe and
+    // reports on screen whether the camera itself works in the WebView and at what size;
+    // tap again to start the real scanner. Lets us see past the "black, no error" wall.
+    if (window.Capacitor && !window.__camProbed) {
+      window.__camProbed = true;
+      var hint = $('tap-hint');
+      hint.textContent = 'Testing camera…';
+      try {
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+          .then(function (s) {
+            var t = (s.getVideoTracks && s.getVideoTracks()[0]) || null;
+            var st = (t && t.getSettings) ? t.getSettings() : {};
+            hint.textContent = 'Camera OK: ' + (st.width || '?') + 'x' + (st.height || '?') + ' — tap again to scan';
+            toast('Raw camera OK ' + (st.width || '?') + 'x' + (st.height || '?'), false);
+            setTimeout(function () { try { s.getTracks().forEach(function (x) { x.stop(); }); } catch (e) {} }, 1200);
+          })
+          .catch(function (e) {
+            hint.textContent = 'Camera FAILED: ' + (e && e.name);
+            toast('Raw camera error: ' + (e && (e.name + ' — ' + e.message)), true);
+          });
+      } catch (e) { hint.textContent = 'Camera threw'; toast('Probe threw: ' + e, true); }
+      return;
+    }
+
     starting = true;
     qr = qr || new Html5Qrcode('reader', {
       formatsToSupport: supportedFormats(),
