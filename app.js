@@ -298,12 +298,14 @@
     if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); return; }
 
     starting = true;
-    qr = qr || new Html5Qrcode('reader', {
-      formatsToSupport: supportedFormats(),
-      // use the phone's built-in barcode detector when available (much faster on Android)
-      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-      verbose: false
-    });
+    function makeScanner() {
+      return new Html5Qrcode('reader', {
+        formatsToSupport: supportedFormats(),
+        // use the phone's built-in barcode detector when available (much faster on Android)
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        verbose: false
+      });
+    }
     var cfg = {
       // More decode attempts per second = quicker reads on both platforms. The native
       // detector (Android) and the WASM decoder (iPhone) both comfortably keep up at 24.
@@ -323,37 +325,48 @@
       disableFlip: true
     };
 
-    // Open the camera with one delayed retry: a deviceId that's over-constrained or a
-    // camera that's momentarily "busy" (NotReadable/Abort — common right after the
-    // label-unlock stream is released, or when another tab/app held it) throws on the
-    // first try but succeeds ~0.7s later. We also fall back from an exact deviceId to
-    // a loose facingMode request.
-    // Ensure html5-qrcode is in a clean (NOT_STARTED) state before each (re)start.
-    // Calling start() again while it's still SCANNING/PAUSED — e.g. after a failed
-    // start, or a retry below — throws a non-camera "Cannot transition to a new state"
-    // string error, which is exactly what produced "Cannot open camera" with no cause.
-    // getState(): 1=NOT_STARTED, 2=SCANNING, 3=PAUSED. The clean path resolves the
-    // Promise synchronously (a microtask), so the tap's user-activation is preserved.
-    function safeStart(source) {
-      var pre = Promise.resolve();
-      try {
-        var st = qr.getState ? qr.getState() : 1;
-        if (st === 2 || st === 3) pre = qr.stop().then(function () { try { qr.clear(); } catch (e) {} }).catch(function () {});
-      } catch (e) {}
-      return pre.then(function () { return qr.start(source, cfg, onScan, function () { /* per-frame misses: ignore */ }); });
+    // Tear down a stuck/old scanner and hand back a guaranteed-clean instance. The
+    // Android WebView keeps the page alive across app reopens, so a previous failed/
+    // half-open start stays SCANNING/PAUSED or locked mid-transition; reusing it makes
+    // start() throw "Cannot transition to a new state". A FRESH Html5Qrcode is always
+    // NOT_STARTED, so we rebuild whenever the current one isn't cleanly idle.
+    // getState(): 1=NOT_STARTED, 2=SCANNING, 3=PAUSED.
+    function ensureCleanScanner() {
+      if (!qr) { qr = makeScanner(); return Promise.resolve(); }
+      var st;
+      try { st = qr.getState ? qr.getState() : 1; } catch (e) { st = 0; }
+      if (st === 1) return Promise.resolve();          // already idle → reuse (keeps first-tap synchronous)
+      var old = qr; qr = null;                          // discard the stuck one, build fresh
+      return Promise.resolve()
+        .then(function () { return old.stop(); }).catch(function () {})
+        .then(function () { try { old.clear(); } catch (e) {} })
+        .catch(function () {})
+        .then(function () { qr = makeScanner(); });
     }
 
+    // Start with one delayed retry for a momentarily "busy" camera (NotReadable/Abort)
+    // and a fallback from an exact deviceId to a loose facingMode request. If the library
+    // itself errors with a state/transition message, rebuild a fresh instance and retry.
     function tryStart(source) {
-      return safeStart(source)
+      return qr.start(source, cfg, onScan, function () { /* per-frame misses: ignore */ })
         .catch(function (err) {
           var n = err && err.name;
+          var msg = ((err && (err.message || err.name)) || err) + '';
+          if (/transition|already|not in (the )?correct|state/i.test(msg) && !n) {
+            var old = qr; qr = null;
+            return Promise.resolve()
+              .then(function () { return old.stop(); }).catch(function () {})
+              .then(function () { try { old.clear(); } catch (e) {} })
+              .then(function () { qr = makeScanner(); return new Promise(function (r) { setTimeout(r, 300); }); })
+              .then(function () { return qr.start(source, cfg, onScan, function () {}); });
+          }
           if (source.deviceId && (n === 'OverconstrainedError' || n === 'NotFoundError' || n === 'NotReadableError')) {
             pickedCameraId = null;
             return new Promise(function (r) { setTimeout(r, 500); })
-              .then(function () { return safeStart({ facingMode: 'environment', advanced: [{ focusMode: 'continuous' }] }); });
+              .then(function () { return qr.start({ facingMode: 'environment', advanced: [{ focusMode: 'continuous' }] }, cfg, onScan, function () {}); });
           }
           if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError') {
-            return new Promise(function (r) { setTimeout(r, 700); }).then(function () { return safeStart(source); });
+            return new Promise(function (r) { setTimeout(r, 700); }).then(function () { return qr.start(source, cfg, onScan, function () {}); });
           }
           throw err;
         });
@@ -374,7 +387,8 @@
     // focusMode goes in `advanced` (best-effort, never causes the request to be
     // rejected). Resolution is applied AFTER the stream is live, where it can't block.
     source.advanced = [{ focusMode: 'continuous' }];
-    tryStart(source)
+    ensureCleanScanner()
+      .then(function () { return tryStart(source); })
       .then(function () {
         scanning = true; starting = false;
         $('viewfinder').classList.add('live');
