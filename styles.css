@@ -77,6 +77,12 @@ textarea.input{resize:vertical; min-height:64px}
 .viewfinder-card{
   position:relative; width:100%; aspect-ratio:1/1; max-height:60vh;
   background:#000; border-radius:var(--r-card); overflow:hidden; box-shadow:var(--shadow);
+  /* Force this clipped (border-radius + overflow:hidden) container onto its own GPU
+     compositing layer. Without this, Android's WebView renders the camera <video>
+     inside it as a solid BLACK box (it works fine in desktop/mobile Chrome). This is
+     what makes the live preview show inside the native APK. */
+  transform:translateZ(0);
+  -webkit-mask-image:-webkit-radial-gradient(white, black);
 }
 .reader{position:absolute; inset:0}
 .reader video{width:100%!important; height:100%!important; object-fit:cover!important}

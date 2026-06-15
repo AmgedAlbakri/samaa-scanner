@@ -297,42 +297,6 @@
     if (scanning || starting) return;
     if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); return; }
 
-    // TEMP diagnostic — runs ONLY inside the native app (window.Capacitor exists there,
-    // never in a normal browser/PWA). The first tap runs a raw getUserMedia probe and
-    // reports on screen whether the camera itself works in the WebView and at what size;
-    // tap again to start the real scanner. Lets us see past the "black, no error" wall.
-    if (window.Capacitor && !window.__camProbed) {
-      window.__camProbed = true;
-      var hint = $('tap-hint');
-      hint.textContent = 'Testing camera…';
-      try {
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-          .then(function (s) {
-            var t = (s.getVideoTracks && s.getVideoTracks()[0]) || null;
-            var st = (t && t.getSettings) ? t.getSettings() : {};
-            hint.textContent = 'Camera OK ' + (st.width || '?') + 'x' + (st.height || '?') + ' — test video (top) 8s';
-            toast('Raw camera OK ' + (st.width || '?') + 'x' + (st.height || '?'), false);
-            // Show the stream in an UNCLIPPED full-width video at the top of the screen
-            // (no border-radius/overflow parent). If THIS shows the camera, the black
-            // preview is caused by the clipped .viewfinder-card; if it's also black, the
-            // WebView can't composite a camera <video> at all (needs a canvas approach).
-            var v = document.createElement('video');
-            v.setAttribute('playsinline', ''); v.muted = true; v.autoplay = true;
-            v.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:45vh;object-fit:cover;z-index:99999;background:#000';
-            document.body.appendChild(v);
-            v.srcObject = s;
-            var p = v.play();
-            if (p && p.catch) p.catch(function (e) { toast('video.play err: ' + (e && e.name), true); });
-            setTimeout(function () { try { s.getTracks().forEach(function (x) { x.stop(); }); v.remove(); } catch (e) {} }, 8000);
-          })
-          .catch(function (e) {
-            hint.textContent = 'Camera FAILED: ' + (e && e.name);
-            toast('Raw camera error: ' + (e && (e.name + ' — ' + e.message)), true);
-          });
-      } catch (e) { hint.textContent = 'Camera threw'; toast('Probe threw: ' + e, true); }
-      return;
-    }
-
     starting = true;
     qr = qr || new Html5Qrcode('reader', {
       formatsToSupport: supportedFormats(),
