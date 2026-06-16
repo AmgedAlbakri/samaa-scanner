@@ -316,3 +316,60 @@ body.native-scan > *:not(#native-scan-overlay){ visibility:hidden !important; }
 }
 .toast[hidden]{display:none}
 .toast.err{background:#C0392B}
+
+/* ════════════════════════ ANIMATIONS ════════════════════════ */
+/* Branded launch splash (logo eases in, settles, then the overlay fades away). */
+.app-splash{
+  position:fixed; inset:0; z-index:9999; display:flex; align-items:center; justify-content:center;
+  background:var(--bg); animation:splashOut .5s ease 1.5s forwards;
+}
+.app-splash .splash-logo{
+  width:160px; animation:splashLogo 1.15s cubic-bezier(.2,.75,.2,1) both;
+}
+@keyframes splashLogo{
+  0%{ opacity:0; transform:scale(.72) translateY(10px); }
+  55%{ opacity:1; transform:scale(1.05); }
+  100%{ opacity:1; transform:scale(1); }
+}
+@keyframes splashOut{ to{ opacity:0; visibility:hidden; } }
+
+/* Logo: gentle entrance + a slow breathing float on the login/auth screens. */
+.login-logo{ animation:logoIn .7s cubic-bezier(.2,.8,.2,1) both, floatY 5s ease-in-out .7s infinite; }
+.appbar-logo{ animation:logoIn .5s ease both; }
+@keyframes logoIn{ from{ opacity:0; transform:translateY(-8px) scale(.92); } to{ opacity:1; transform:none; } }
+@keyframes floatY{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-5px); } }
+
+/* Auth screens fade/scale in. */
+.screen-login.active{ animation:fadeUp .4s ease both; }
+
+/* List rows + product cards fade up, lightly staggered for a cascading feel. */
+.row, .pcard{ animation:fadeUp .32s ease both; }
+.row:nth-child(1),.pcard:nth-child(1){ animation-delay:.02s }
+.row:nth-child(2),.pcard:nth-child(2){ animation-delay:.05s }
+.row:nth-child(3),.pcard:nth-child(3){ animation-delay:.08s }
+.row:nth-child(4),.pcard:nth-child(4){ animation-delay:.11s }
+.row:nth-child(5),.pcard:nth-child(5){ animation-delay:.14s }
+.row:nth-child(6),.pcard:nth-child(6){ animation-delay:.17s }
+.row:nth-child(7),.pcard:nth-child(7){ animation-delay:.20s }
+.row:nth-child(n+8),.pcard:nth-child(n+8){ animation-delay:.22s }
+@keyframes fadeUp{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+
+/* Toast slides up as it appears. */
+.toast:not([hidden]){ animation:toastIn .26s cubic-bezier(.2,.8,.2,1); }
+@keyframes toastIn{ from{ opacity:0; transform:translate(-50%, 14px); } to{ opacity:1; transform:translate(-50%, 0); } }
+
+/* Active nav icon gives a little pop. */
+.nav-btn.active .nav-ico{ animation:navPop .32s cubic-bezier(.2,.9,.2,1); }
+@keyframes navPop{ 0%{ transform:scale(.8); } 60%{ transform:scale(1.12); } 100%{ transform:scale(1); } }
+
+/* Smoother presses across the main tappables. */
+.btn-primary,.btn-pill,.row-action,.chip,.nav-btn{ transition:transform .12s ease, opacity .12s ease, background .2s ease, color .2s ease; }
+.btn-pill:active,.chip:active{ transform:scale(.97); }
+
+/* Product sheet content rises in after the panel. */
+.sheet-panel .product-card,.sheet-panel .notfound,.sheet-panel .edit-form{ animation:fadeUp .3s ease .08s both; }
+
+/* Respect users who ask for less motion. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{ animation-duration:.001ms!important; animation-iteration-count:1!important; transition-duration:.001ms!important; }
+}

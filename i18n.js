@@ -222,6 +222,10 @@
     var toggle = document.getElementById('lang-toggle');
     if (toggle) toggle.addEventListener('click', function () { applyLang(lang === 'en' ? 'ar' : 'en'); });
     applyLang(lang);
+    // Retire the launch splash once its fade-out animation has finished, so it stops
+    // intercepting taps. (CSS fades it at 1.5s over .5s; remove just after.)
+    var splash = document.getElementById('app-splash');
+    if (splash) setTimeout(function () { splash.remove(); }, 2150);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
