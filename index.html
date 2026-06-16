@@ -41,18 +41,21 @@
 </head>
 <body>
 
+<!-- language switcher (floats top inline-end; logo always sits inline-start, so no overlap) -->
+<button id="lang-toggle" class="lang-toggle" type="button" aria-label="Change language">العربية</button>
+
 <!-- ═══════════════════════ DEVICE ENROLL (one-time code) ═══════════════════════ -->
 <section id="screen-enroll" class="screen-login">
   <div class="login-wrap">
     <img class="login-logo" src="brand/logo-transparent.png" alt="SAMAA MAJU" />
-    <h1 class="login-title">Activate this device</h1>
-    <p class="login-sub">Enter the one-time code from your administrator</p>
+    <h1 class="login-title" data-i18n="activate_title">Activate this device</h1>
+    <p class="login-sub" data-i18n="activate_sub">Enter the one-time code from your administrator</p>
     <form id="enroll-form" autocomplete="off">
       <input id="enroll-code" class="input" type="text" inputmode="text"
-             placeholder="Access code" autocomplete="off" autocapitalize="characters"
+             data-i18n-ph="activate_ph" placeholder="Access code" autocomplete="off" autocapitalize="characters"
              spellcheck="false" required />
       <div id="enroll-error" class="form-error" hidden></div>
-      <button id="enroll-btn" class="btn-primary" type="submit">Activate</button>
+      <button id="enroll-btn" class="btn-primary" type="submit" data-i18n="activate_btn">Activate</button>
     </form>
   </div>
 </section>
@@ -61,8 +64,8 @@
 <section id="screen-blocked" class="screen-login">
   <div class="login-wrap">
     <div class="nf-emoji">🚫</div>
-    <h1 class="login-title">Device blocked</h1>
-    <p id="blocked-msg" class="login-sub">This device has been blocked. Please contact your administrator.</p>
+    <h1 class="login-title" data-i18n="blocked_title">Device blocked</h1>
+    <p id="blocked-msg" class="login-sub" data-i18n="blocked_msg">This device has been blocked. Please contact your administrator.</p>
   </div>
 </section>
 
@@ -70,15 +73,15 @@
 <section id="screen-login" class="screen-login active">
   <div class="login-wrap">
     <img class="login-logo" src="brand/logo-transparent.png" alt="SAMAA MAJU" />
-    <h1 class="login-title">Staff Scanner</h1>
-    <p class="login-sub">Sign in to continue</p>
+    <h1 class="login-title" data-i18n="login_title">Staff Scanner</h1>
+    <p class="login-sub" data-i18n="login_sub">Sign in to continue</p>
     <form id="login-form" autocomplete="on">
       <input id="login-id" class="input" type="text" inputmode="email"
-             placeholder="Email or username" autocomplete="username" required />
+             data-i18n-ph="login_id_ph" placeholder="Email or username" autocomplete="username" required />
       <input id="login-pw" class="input" type="password"
-             placeholder="Password" autocomplete="current-password" required />
+             data-i18n-ph="login_pw_ph" placeholder="Password" autocomplete="current-password" required />
       <div id="login-error" class="form-error" hidden></div>
-      <button id="login-btn" class="btn-primary" type="submit">Log in</button>
+      <button id="login-btn" class="btn-primary" type="submit" data-i18n="login_btn">Log in</button>
     </form>
   </div>
 </section>
@@ -96,13 +99,13 @@
 
     <!-- ───────── SCAN ───────── -->
     <section id="screen-scan" class="screen active">
-      <p class="greeting">Hello, <span id="greet-name">there</span> 👋</p>
+      <p class="greeting" id="greeting"></p>
 
       <div id="viewfinder" class="viewfinder-card">
         <div id="reader" class="reader"></div>
         <div class="reticle"></div>
-        <div id="tap-hint" class="tap-hint">Tap to start the camera</div>
-        <div id="live-hint" class="live-hint">Blurry? Tap the image to capture &amp; scan</div>
+        <div id="tap-hint" class="tap-hint" data-i18n="tap_start">Tap to start the camera</div>
+        <div id="live-hint" class="live-hint" data-i18n="live_hint">Blurry? Tap the image to capture &amp; scan</div>
         <div id="scan-toast" class="scan-toast" hidden></div>
         <div id="zoom-wrap" class="zoom-wrap" hidden>
           <span class="zoom-ico">−</span>
@@ -113,21 +116,21 @@
       </div>
 
       <div class="scan-controls">
-        <button id="scan-toggle" class="btn-pill">Start camera</button>
+        <button id="scan-toggle" class="btn-pill" data-i18n="start_cam">Start camera</button>
       </div>
 
       <form id="manual-form" class="manual-row" autocomplete="off">
         <input id="manual-code" class="manual-input" type="text" inputmode="numeric"
-               pattern="[0-9]*" placeholder="Can't scan? Type the barcode" aria-label="Barcode number" />
-        <button id="manual-go" class="btn-pill secondary" type="submit">Look up</button>
+               pattern="[0-9]*" data-i18n-ph="manual_ph" placeholder="Can't scan? Type the barcode" aria-label="Barcode number" />
+        <button id="manual-go" class="btn-pill secondary" type="submit" data-i18n="look_up">Look up</button>
       </form>
 
       <div class="list-head">
-        <h3>This session <span id="session-count" class="count-badge">0</span></h3>
-        <button id="session-clear" class="link-btn">Clear</button>
+        <h3><span data-i18n="this_session">This session</span> <span id="session-count" class="count-badge">0</span></h3>
+        <button id="session-clear" class="link-btn" data-i18n="clear">Clear</button>
       </div>
       <div id="session-list" class="row-list">
-        <p class="empty">Scan a barcode to begin. Scans stack up here.</p>
+        <p class="empty" data-i18n="session_empty">Scan a barcode to begin. Scans stack up here.</p>
       </div>
     </section>
 
@@ -135,22 +138,22 @@
     <section id="screen-products" class="screen">
       <div class="search-bar">
         <svg viewBox="0 0 24 24" class="search-ico"><path d="M21 21l-4.3-4.3M11 19a8 8 0 110-16 8 8 0 010 16z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <input id="search-input" class="search-input" type="search" placeholder="Search products, SKU…" />
+        <input id="search-input" class="search-input" type="search" data-i18n-ph="search_ph" placeholder="Search products, SKU…" />
       </div>
       <div id="chips" class="chips"></div>
       <div id="products-list" class="card-grid">
-        <p class="empty">Loading products…</p>
+        <p class="empty" data-i18n="products_loading">Loading products…</p>
       </div>
     </section>
 
     <!-- ───────── LOG ───────── -->
     <section id="screen-log" class="screen">
       <div class="list-head">
-        <h3>Scan history</h3>
-        <button id="log-clear" class="link-btn">Clear</button>
+        <h3 data-i18n="scan_history">Scan history</h3>
+        <button id="log-clear" class="link-btn" data-i18n="clear">Clear</button>
       </div>
       <div id="log-list" class="row-list">
-        <p class="empty">No scans yet.</p>
+        <p class="empty" data-i18n="log_empty">No scans yet.</p>
       </div>
     </section>
 
@@ -166,13 +169,13 @@
 
       <div class="profile-actions">
         <button class="row-action" data-act="change-username">
-          <span>Change username</span><span class="chev">›</span>
+          <span data-i18n="change_username">Change username</span><span class="chev">›</span>
         </button>
         <button class="row-action" data-act="change-password">
-          <span>Change password</span><span class="chev">›</span>
+          <span data-i18n="change_password">Change password</span><span class="chev">›</span>
         </button>
         <button id="logout-btn" class="row-action danger">
-          <span>Log out</span><span class="chev">›</span>
+          <span data-i18n="log_out">Log out</span><span class="chev">›</span>
         </button>
       </div>
     </section>
@@ -181,25 +184,25 @@
 
   <!-- bottom nav -->
   <nav class="bottom-nav">
-    <button class="nav-btn active" data-screen="scan" aria-label="Scan">
+    <button class="nav-btn active" data-screen="scan" data-i18n-aria="nav_scan" aria-label="Scan">
       <span class="nav-ico">
         <svg viewBox="0 0 24 24"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M3 12h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      </span><span class="nav-lbl">Scan</span>
+      </span><span class="nav-lbl" data-i18n="nav_scan">Scan</span>
     </button>
-    <button class="nav-btn" data-screen="products" aria-label="Products">
+    <button class="nav-btn" data-screen="products" data-i18n-aria="nav_products" aria-label="Products">
       <span class="nav-ico">
         <svg viewBox="0 0 24 24"><path d="M3 9l9-5 9 5-9 5-9-5zM3 9v6l9 5 9-5V9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-      </span><span class="nav-lbl">Products</span>
+      </span><span class="nav-lbl" data-i18n="nav_products">Products</span>
     </button>
-    <button class="nav-btn" data-screen="log" aria-label="Log">
+    <button class="nav-btn" data-screen="log" data-i18n-aria="nav_log" aria-label="Log">
       <span class="nav-ico">
         <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      </span><span class="nav-lbl">Log</span>
+      </span><span class="nav-lbl" data-i18n="nav_log">Log</span>
     </button>
-    <button class="nav-btn" data-screen="profile" aria-label="Profile">
+    <button class="nav-btn" data-screen="profile" data-i18n-aria="nav_profile" aria-label="Profile">
       <span class="nav-ico">
         <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 100-8 4 4 0 000 8zM5 20a7 7 0 0114 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      </span><span class="nav-lbl">Profile</span>
+      </span><span class="nav-lbl" data-i18n="nav_profile">Profile</span>
     </button>
   </nav>
 </div>
@@ -219,11 +222,11 @@
       </div>
       <div class="price-block">
         <div class="price-row">
-          <span class="muted">Price</span>
+          <span class="muted" data-i18n="price">Price</span>
           <span id="pc-price" class="pc-price">RM —</span>
         </div>
         <div class="discount-row">
-          <span class="muted">Discount</span>
+          <span class="muted" data-i18n="discount">Discount</span>
           <div class="stepper">
             <button id="disc-minus" class="step-btn" type="button">−</button>
             <span class="disc-field">
@@ -235,12 +238,12 @@
           </div>
         </div>
         <div class="price-row final">
-          <span class="muted">After discount</span>
+          <span class="muted" data-i18n="after_discount">After discount</span>
           <span id="pc-final" class="pc-final">RM —</span>
         </div>
       </div>
       <svg id="pc-barcode" class="pc-barcode"></svg>
-      <button id="pc-edit" class="btn-primary">Request edit</button>
+      <button id="pc-edit" class="btn-primary" data-i18n="request_edit">Request edit</button>
     </div>
   </div>
 </div>
@@ -252,9 +255,9 @@
     <div class="sheet-grip"></div>
     <div class="notfound">
       <div class="nf-emoji">🔍</div>
-      <h2>Barcode not recognised</h2>
-      <p class="muted">No product matches <b id="nf-code">—</b>.</p>
-      <button id="nf-add" class="btn-primary">Request: add this product</button>
+      <h2 data-i18n="nf_title">Barcode not recognised</h2>
+      <p class="muted"><span data-i18n="nf_msg_pre">No product matches</span> <b id="nf-code">—</b>.</p>
+      <button id="nf-add" class="btn-primary" data-i18n="nf_add">Request: add this product</button>
     </div>
   </div>
 </div>
@@ -265,24 +268,24 @@
   <div class="sheet-panel">
     <div class="sheet-grip"></div>
     <form id="edit-form" class="edit-form">
-      <h2>Request a change</h2>
-      <label class="fld"><span>SKU</span>
+      <h2 data-i18n="edit_title">Request a change</h2>
+      <label class="fld"><span data-i18n="sku">SKU</span>
         <input id="er-sku" class="input" type="text" readonly /></label>
-      <label class="fld"><span>Product</span>
+      <label class="fld"><span data-i18n="product">Product</span>
         <input id="er-name" class="input" type="text" readonly /></label>
-      <label class="fld"><span>What needs changing?</span>
+      <label class="fld"><span data-i18n="what_changing">What needs changing?</span>
         <select id="er-field" class="input">
-          <option>Name</option><option>Price</option><option>Image</option>
-          <option>Barcode</option><option>Other</option>
+          <option data-i18n="opt_name">Name</option><option data-i18n="opt_price">Price</option><option data-i18n="opt_image">Image</option>
+          <option data-i18n="opt_barcode">Barcode</option><option data-i18n="opt_other">Other</option>
         </select></label>
-      <label class="fld"><span>Current value</span>
+      <label class="fld"><span data-i18n="current_value">Current value</span>
         <input id="er-current" class="input" type="text" /></label>
-      <label class="fld"><span>Requested value</span>
+      <label class="fld"><span data-i18n="requested_value">Requested value</span>
         <input id="er-new" class="input" type="text" /></label>
-      <label class="fld"><span>Reason</span>
+      <label class="fld"><span data-i18n="reason">Reason</span>
         <textarea id="er-reason" class="input" rows="3" maxlength="500"></textarea></label>
       <div id="er-error" class="form-error" hidden></div>
-      <button class="btn-primary" type="submit">Submit request</button>
+      <button class="btn-primary" type="submit" data-i18n="submit_request">Submit request</button>
     </form>
   </div>
 </div>
@@ -294,12 +297,12 @@
     <div class="sheet-grip"></div>
     <form id="cred-form" class="edit-form">
       <h2 id="cred-title">Change</h2>
-      <label class="fld"><span>Current password</span>
+      <label class="fld"><span data-i18n="cred_current_pw">Current password</span>
         <input id="cred-current" class="input" type="password" autocomplete="current-password" /></label>
-      <label class="fld" id="cred-new-wrap"><span id="cred-new-label">New value</span>
+      <label class="fld" id="cred-new-wrap"><span id="cred-new-label" data-i18n="new_value">New value</span>
         <input id="cred-new" class="input" type="text" /></label>
       <div id="cred-error" class="form-error" hidden></div>
-      <button class="btn-primary" type="submit">Save</button>
+      <button class="btn-primary" type="submit" data-i18n="save">Save</button>
     </form>
   </div>
 </div>
@@ -307,6 +310,7 @@
 <!-- global toast -->
 <div id="toast" class="toast" hidden></div>
 
+<script src="i18n.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
 </body>

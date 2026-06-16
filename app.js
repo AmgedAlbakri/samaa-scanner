@@ -61,16 +61,32 @@
   //   unauthorized   → expired/invalid session
   function handleUnauthorized(res) {
     if (!res) return false;
-    if (res.reason === 'inactive') { doLogout('Your account has been deactivated — contact admin.'); return true; }
-    if (res.reason === 'device_revoked') { doLogout('This device is no longer authorized.'); return true; }
-    if (res.reason === 'unauthorized') { doLogout('Session expired — please log in again.'); return true; }
+    if (res.reason === 'inactive') { doLogout(t('acc_deactivated')); return true; }
+    if (res.reason === 'device_revoked') { doLogout(t('device_unauth')); return true; }
+    if (res.reason === 'unauthorized') { doLogout(t('session_expired')); return true; }
     return false;
   }
 
   // ════════════════════════════════════════════════════════════════════════
   //  NAVIGATION
   // ════════════════════════════════════════════════════════════════════════
-  var TITLES = { scan: 'Scan', products: 'Products', log: 'Log', profile: 'Profile' };
+  var activeScreen = 'scan';
+  var greetName = 'there';
+  function renderGreeting() { var g = $('greeting'); if (g) g.textContent = t('greeting', { name: greetName }); }
+
+  // Re-render everything language-dependent when the user flips EN/AR. Static text is
+  // handled by i18n.js; here we redo the JS-rendered bits.
+  window.addEventListener('langchange', function () {
+    if (!$('app').hidden) {
+      $('appbar-title').textContent = t('nav_' + activeScreen);
+      renderGreeting();
+      var st = $('scan-toggle'); if (st) st.textContent = t(scanning ? 'stop_cam' : 'start_cam');
+      if (!scanning) { var th = $('tap-hint'); if (th) th.textContent = t('tap_start'); }
+      try { renderSession(); } catch (e) {}
+      try { renderLog(); } catch (e) {}
+      if (allProducts.length) { try { applyFilter(); } catch (e) {} }
+    }
+  });
 
   function showScreen(name) {
     ['scan', 'products', 'log', 'profile'].forEach(function (s) {
@@ -80,7 +96,8 @@
     document.querySelectorAll('.nav-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.screen === name);
     });
-    $('appbar-title').textContent = TITLES[name] || '';
+    activeScreen = name;
+    $('appbar-title').textContent = t('nav_' + name);
     // camera only runs on the Scan screen (saves battery / frees the camera)
     if (name === 'scan') startScanner(); else stopScanner();
     if (name === 'products' && !allProducts.length) loadProducts();
@@ -97,7 +114,7 @@
   function enterApp() {
     $('screen-login').classList.remove('active');
     $('app').hidden = false;
-    $('greet-name').textContent = (user && user.username) || 'there';
+    greetName = (user && user.username) || 'there'; renderGreeting();
     $('profile-username').textContent = (user && user.username) || '—';
     $('profile-email').textContent = (user && user.email) || '—';
     showScreen('scan');
@@ -171,10 +188,10 @@
     var code = $('enroll-code').value.trim();
     var errEl = $('enroll-error'); errEl.hidden = true;
     if (!code) { showErr(errEl, 'Enter the access code.'); return; }
-    var btn = $('enroll-btn'); btn.disabled = true; btn.textContent = 'Activating…';
+    var btn = $('enroll-btn'); btn.disabled = true; btn.textContent = t('activating');
     api('enrollDevice', { code: code }).then(function (res) {
-      btn.disabled = false; btn.textContent = 'Activate';
-      if (res && res.ok) { $('enroll-code').value = ''; showLogin(); toast('Device activated ✓'); return; }
+      btn.disabled = false; btn.textContent = t('activate_btn');
+      if (res && res.ok) { $('enroll-code').value = ''; showLogin(); toast(t('device_activated')); return; }
       if (res && res.state === 'blocked') { showBlocked(res.until); return; }
       var left = (res && typeof res.attemptsLeft === 'number') ? res.attemptsLeft : null;
       var msg = ({
@@ -194,9 +211,9 @@
     errEl.hidden = true;
     if (!id || !pw) { showErr(errEl, 'Enter your email/username and password.'); return; }
 
-    var btn = $('login-btn'); btn.disabled = true; btn.textContent = 'Logging in…';
+    var btn = $('login-btn'); btn.disabled = true; btn.textContent = t('logging_in');
     api('login', { identifier: id, password: pw }).then(function (res) {
-      btn.disabled = false; btn.textContent = 'Log in';
+      btn.disabled = false; btn.textContent = t('login_btn');
       if (res.ok) {
         token = res.sessionToken;
         user = res.user;
@@ -310,7 +327,7 @@
     // path below.
     if (window.Capacitor && ('BarcodeDetector' in window)) { startNativeScanner(); return; }
 
-    if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); starting = false; return; }
+    if (!window.Html5Qrcode) { toast(t('scanner_failed'), true); starting = false; return; }
     function makeScanner() {
       return new Html5Qrcode('reader', {
         formatsToSupport: supportedFormats(),
@@ -405,7 +422,7 @@
       .then(function () {
         scanning = true; starting = false;
         $('viewfinder').classList.add('live');
-        $('scan-toggle').textContent = 'Stop camera';
+        $('scan-toggle').textContent = t('stop_cam');
         applyFocusTweaks();
         // Permission is granted and a stream is live → now it's safe to find the best
         // rear lens (labels are populated, so resolveCamera won't open a throwaway
@@ -417,7 +434,7 @@
       })
       .catch(function (err) {
         starting = false;
-        $('tap-hint').textContent = 'Tap to start the camera';
+        $('tap-hint').textContent = t('tap_start');
         toast(cameraErrText(err), true);
         console.warn('camera start failed', err);
       });
@@ -457,7 +474,7 @@
       .then(function (v) {
         usingNative = true; scanning = true; starting = false;
         $('viewfinder').classList.add('live');
-        $('scan-toggle').textContent = 'Stop camera';
+        $('scan-toggle').textContent = t('stop_cam');
         var caps = (videoTrack && videoTrack.getCapabilities) ? videoTrack.getCapabilities() : {};
         nativeCamTweaks();                                   // widest zoom + continuous focus
         setTimeout(nativeCamTweaks, 1200);                   // re-assert after warm-up
@@ -467,7 +484,7 @@
       })
       .catch(function (err) {
         starting = false; usingNative = false;
-        $('tap-hint').textContent = 'Tap to start the camera';
+        $('tap-hint').textContent = t('tap_start');
         toast(cameraErrText(err), true);
         console.warn('native camera start failed', err);
       });
@@ -535,7 +552,7 @@
     }).catch(function (e) {
       starting = false;
       stopMlkitScan();
-      toast('Camera error: ' + (e && (e.message || e.code || e)), true);
+      toast(t('cam_error_prefix') + (e && (e.message || e.code || e)), true);
       console.warn('mlkit startScan failed', e);
     });
   }
@@ -548,7 +565,7 @@
     document.body.classList.remove('native-scan');
     hideScanOverlay();
     usingMlkit = false; scanning = false;
-    var t = $('scan-toggle'); if (t) t.textContent = 'Start camera';
+    var tg = $('scan-toggle'); if (tg) tg.textContent = t('start_cam');
   }
   function showScanOverlay() {
     var o = $('native-scan-overlay');
@@ -557,9 +574,9 @@
     o.id = 'native-scan-overlay';
     o.className = 'native-scan-overlay';
     o.innerHTML =
-      '<div class="ns-hint">Point the camera at a barcode</div>' +
+      '<div class="ns-hint">' + t('point_camera') + '</div>' +
       '<div class="ns-frame"></div>' +
-      '<button id="ns-stop" class="ns-stop">Stop</button>';
+      '<button id="ns-stop" class="ns-stop">' + t('stop') + '</button>';
     document.body.appendChild(o);
     $('ns-stop').addEventListener('click', function () { stopMlkitScan(); });
   }
@@ -570,16 +587,12 @@
   // they'd already allowed). NotAllowed = truly blocked; NotReadable = busy; etc.
   function cameraErrText(err) {
     var n = (err && err.name) || '';
-    if (!window.isSecureContext)
-      return 'Camera needs a secure (https) connection — open the app via its https link.';
-    if (n === 'NotAllowedError' || n === 'SecurityError')
-      return 'Camera blocked. In Chrome: tap the icon left of the web address → Permissions → Camera → Allow, then reload. (Also check Android Settings → Apps → Chrome → Permissions → Camera.)';
-    if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError')
-      return 'Camera is busy — close other apps/tabs using it, then tap Start camera again.';
-    if (n === 'NotFoundError' || n === 'OverconstrainedError')
-      return 'No usable camera found — reload the page and try again.';
+    if (!window.isSecureContext) return t('cam_insecure');
+    if (n === 'NotAllowedError' || n === 'SecurityError') return t('cam_blocked');
+    if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError') return t('cam_busy');
+    if (n === 'NotFoundError' || n === 'OverconstrainedError') return t('cam_notfound');
     var detail = n || (err && err.message) || (typeof err === 'string' ? err : '');
-    return 'Cannot open camera' + (detail ? ' [' + String(detail).slice(0, 90) + ']' : '') + ' — reload and try again.';
+    return t('cam_generic', { detail: (detail ? ' [' + String(detail).slice(0, 90) + ']' : '') });
   }
 
   // Grab the live video track and (re-)assert continuous autofocus. Some Android
@@ -689,7 +702,7 @@
     if (!videoTrack || capturing) return;
     capturing = true;
     refocus();                       // nudge AF first; takePhoto also focuses
-    flashToast('Focusing…');
+    flashToast(t('focusing'));
 
     function decodeBitmap(bitmap) {
       if (!bitmap) throw new Error('no frame');
@@ -732,8 +745,8 @@
     }
 
     got.then(decodeBitmap)
-      .then(function (found) { if (!found) flashToast('No barcode — hold steady, tap again'); })
-      .catch(function () { flashToast('Could not capture — tap again'); })
+      .then(function (found) { if (!found) flashToast(t('no_barcode')); })
+      .catch(function () { flashToast(t('capture_fail')); })
       .finally(function () { capturing = false; });
   }
 
@@ -753,7 +766,7 @@
     var card = document.querySelector('.viewfinder-card'); if (card) card.style.aspectRatio = '';
     var vf = $('viewfinder'); if (vf) vf.classList.remove('live');
     var zw = $('zoom-wrap'); if (zw) zw.hidden = true;
-    var t = $('scan-toggle'); if (t) t.textContent = 'Start camera';
+    var tg = $('scan-toggle'); if (tg) tg.textContent = t('start_cam');
   }
 
   $('scan-toggle').addEventListener('click', function () {
@@ -799,7 +812,7 @@
     }
 
     // 2) not cached → ask the server (covers items added since load)
-    flashToast('Looking up ' + decoded + '…');
+    flashToast(t('looking_up', { code: decoded }));
     api('lookup', { barcode: decoded }).then(function (res) {
       setTimeout(function () { busy = false; }, CFG.SCAN_COOLDOWN_MS);
       if (handleUnauthorized(res)) return;
@@ -808,7 +821,7 @@
         if (p.barcode) barcodeIndex[p.barcode] = p; // cache for next time
         acceptScan(p, decoded);
       } else {
-        flashToast('✗ Not found: ' + decoded);
+        flashToast(t('not_found_code', { code: decoded }));
         openNotFound(decoded);
       }
     });
@@ -889,7 +902,7 @@
     var input = $('manual-code');
     var local = barcodeIndex[code];
     if (local) { acceptScan(local, code); input.value = ''; return; }
-    flashToast('Looking up ' + code + '…');
+    flashToast(t('looking_up', { code: code }));
     api('lookup', { barcode: code }).then(function (res) {
       if (handleUnauthorized(res)) return;
       if (res && res.found) {
@@ -898,7 +911,7 @@
         acceptScan(p, code);
         input.value = '';
       } else {
-        flashToast('✗ Not found: ' + code);
+        flashToast(t('not_found_code', { code: code }));
         openNotFound(code);   // keep the typed code so they can correct it
       }
     });
@@ -925,7 +938,7 @@
     var box = $('session-list');
     if (!sessionScans.length) {
       box.innerHTML = '';
-      box.appendChild(emptyEl('Scan a barcode to begin. Scans stack up here.'));
+      box.appendChild(emptyEl(t('session_empty')));
       return;
     }
     box.innerHTML = '';
@@ -944,7 +957,7 @@
   function renderLog() {
     var box = $('log-list');
     box.innerHTML = '';
-    if (!scanLog.length) { box.appendChild(emptyEl('No scans yet.')); return; }
+    if (!scanLog.length) { box.appendChild(emptyEl(t('log_empty'))); return; }
     scanLog.forEach(function (e) { box.appendChild(rowEl(e, false)); });
   }
   $('log-clear').addEventListener('click', function () {
@@ -962,7 +975,7 @@
     var main = document.createElement('div'); main.className = 'row-main';
     var nm = document.createElement('div'); nm.className = 'row-name'; nm.textContent = e.name || '(no name)';
     var sub = document.createElement('div'); sub.className = 'row-sub';
-    sub.textContent = (e.sku ? 'SKU ' + e.sku : '') + (e.barcode ? '  ·  ' + e.barcode : '');
+    sub.textContent = (e.sku ? t('sku') + ' ' + e.sku : '') + (e.barcode ? '  ·  ' + e.barcode : '');
     main.appendChild(nm); main.appendChild(sub);
     var right = document.createElement('div'); right.className = 'row-right';
     if (showPrice && e.price != null) {
@@ -998,7 +1011,7 @@
 
   function loadProducts() {
     var box = $('products-list');
-    box.innerHTML = ''; box.appendChild(emptyEl('Loading products…'));
+    box.innerHTML = ''; box.appendChild(emptyEl(t('products_loading')));
     api('allProducts', {}).then(function (res) {
       if (handleUnauthorized(res)) return;
       var list = (res && res.products) || (Array.isArray(res) ? res : []);
@@ -1032,7 +1045,7 @@
   function renderProducts(list) {
     var box = $('products-list');
     box.innerHTML = '';
-    if (!list.length) { box.appendChild(emptyEl('No products found.')); return; }
+    if (!list.length) { box.appendChild(emptyEl(t('products_empty'))); return; }
     list.forEach(function (p) {
       var card = document.createElement('button');
       card.className = 'pcard';
@@ -1041,7 +1054,7 @@
       if (p.image) img.src = p.image;
       var body = document.createElement('div'); body.className = 'pcard-body';
       var nm = document.createElement('div'); nm.className = 'pcard-name'; nm.textContent = p.name || '(no name)';
-      var sku = document.createElement('div'); sku.className = 'pcard-sku'; sku.textContent = p.sku ? 'SKU ' + p.sku : '';
+      var sku = document.createElement('div'); sku.className = 'pcard-sku'; sku.textContent = p.sku ? t('sku') + ' ' + p.sku : '';
       body.appendChild(nm); body.appendChild(sku);
       if (p.price != null) {
         var pr = document.createElement('div'); pr.className = 'pcard-price'; pr.textContent = 'RM ' + fmt(p.price);
@@ -1084,7 +1097,7 @@
     $('pc-img').src = p.image || '';
     $('pc-img').alt = p.name || '';
     $('pc-name').textContent = p.name || '(no name)';
-    $('pc-sku').textContent = p.sku ? 'SKU ' + p.sku : 'SKU —';
+    $('pc-sku').textContent = p.sku ? t('sku') + ' ' + p.sku : 'SKU —';
     $('pc-price').textContent = p.price != null ? 'RM ' + fmt(p.price) : 'RM —';
     discount = 0; $('disc-val').value = '0'; updateFinal();
     renderBarcodePreview(p.barcode);
@@ -1175,11 +1188,11 @@
       newValue: $('er-new').value.trim(),
       reason: reason
     };
-    var btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Submitting…';
+    var btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = t('submitting');
     api('editRequest', data).then(function (res) {
-      btn.disabled = false; btn.textContent = 'Submit request';
+      btn.disabled = false; btn.textContent = t('submit_request');
       if (handleUnauthorized(res)) return;
-      if (res && res.ok) { closeSheet('sheet-edit'); toast('Request submitted ✓'); }
+      if (res && res.ok) { closeSheet('sheet-edit'); toast(t('request_submitted')); }
       else showErr(errEl, (res && res.msg) || 'Could not submit. Try again.');
     });
   });
@@ -1192,8 +1205,8 @@
   document.querySelectorAll('[data-act]').forEach(function (b) {
     b.addEventListener('click', function () {
       credMode = b.dataset.act === 'change-username' ? 'username' : 'password';
-      $('cred-title').textContent = credMode === 'username' ? 'Change username' : 'Change password';
-      $('cred-new-label').textContent = credMode === 'username' ? 'New username' : 'New password';
+      $('cred-title').textContent = credMode === 'username' ? t('change_username') : t('change_password');
+      $('cred-new-label').textContent = credMode === 'username' ? t('new_username') : t('new_password');
       $('cred-new').type = credMode === 'username' ? 'text' : 'password';
       $('cred-new').value = '';
       $('cred-current').value = '';
@@ -1218,24 +1231,24 @@
       if (next.length > 256) { showErr(errEl, 'Password is too long.'); return; }
     }
 
-    var btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Saving…';
+    var btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = t('saving');
     var action = credMode === 'username' ? 'changeUsername' : 'changePassword';
     var params = credMode === 'username'
       ? { currentPassword: current, newUsername: next.trim() }
       : { currentPassword: current, newPassword: next };
 
     api(action, params).then(function (res) {
-      btn.disabled = false; btn.textContent = 'Save';
+      btn.disabled = false; btn.textContent = t('save');
       if (handleUnauthorized(res)) return;
       if (res && res.ok) {
         if (credMode === 'username') {
           user.username = res.username;
           localStorage.setItem(KEYS.user, JSON.stringify(user));
           $('profile-username').textContent = user.username;
-          $('greet-name').textContent = user.username;
+          greetName = user.username; renderGreeting();
         }
         closeSheet('sheet-cred');
-        toast('Saved ✓');
+        toast(t('saved'));
       } else {
         var msg = ({
           bad_password: 'Current password is incorrect.',

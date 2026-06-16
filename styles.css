@@ -16,6 +16,24 @@ body{
   -webkit-font-smoothing:antialiased; overscroll-behavior-y:none;
 }
 img{display:block;max-width:100%}
+
+/* ---------- language switcher + RTL (Arabic) ---------- */
+.lang-toggle{
+  position:fixed; top:10px; inset-inline-end:12px; z-index:200;
+  background:rgba(255,255,255,.94); color:var(--navy); border:1px solid var(--hair);
+  border-radius:999px; padding:6px 13px; font-size:13px; font-weight:700;
+  box-shadow:var(--shadow-sm); line-height:1;
+}
+/* keep the toggle clear of the iOS notch / status bar inside the installed app */
+@supports(padding:max(0px)){ .lang-toggle{ top:max(10px, env(safe-area-inset-top)); } }
+/* mirror the little ‘›’ chevrons and keep Latin price/SKU readable in RTL */
+[dir="rtl"] .chev{ display:inline-block; transform:scaleX(-1); }
+[dir="rtl"] .pcard-sku, [dir="rtl"] .row-sub, [dir="rtl"] .pc-sku,
+[dir="rtl"] .pc-price, [dir="rtl"] .pc-final, [dir="rtl"] .row-price, [dir="rtl"] .pcard-price{
+  direction:ltr; unicode-bidi:isolate;
+}
+[dir="rtl"] .row-sub, [dir="rtl"] .pcard-sku{ text-align:start; }
+
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
 .muted{color:var(--muted)}
 

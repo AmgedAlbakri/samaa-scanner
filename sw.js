@@ -5,11 +5,12 @@
  * on the phones because the cached app.js never got replaced.)
  * API calls (cross-origin POST to Apps Script) are always network-only — never cached.
  */
-var CACHE = 'samaa-scanner-v26';
+var CACHE = 'samaa-scanner-v27';
 var SHELL = [
   './',
   './index.html',
   './styles.css',
+  './i18n.js',
   './app.js',
   './config.js',
   './manifest.json',
