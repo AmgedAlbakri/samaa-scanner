@@ -837,20 +837,21 @@
     renderSession();
     pushLog(entry);
     beep();
-    successToast();                  // green "Scanned successfully ✅" at the top
-    flashToast('✓ ' + p.name);       // product name in the viewfinder
+    successToast(p.name);            // green "✅ <product>" at the top
   }
 
   // Brief success toast at the top of the screen, shown on every accepted scan.
+  // Shows the product name (confirms the right item) and falls back to a generic
+  // success message if the name is missing.
   var successTimer = null;
-  function successToast(msg) {
+  function successToast(name) {
     var el = $('scan-success');
     if (!el) return;
-    el.textContent = msg || t('scan_success');
+    el.textContent = name ? ('✅ ' + name) : t('scan_success');
     el.hidden = false;
     el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';  // replay entrance
     clearTimeout(successTimer);
-    successTimer = setTimeout(function () { el.hidden = true; }, 1800);
+    successTimer = setTimeout(function () { el.hidden = true; }, 2000);
   }
 
   // ── success beep (Web Audio — no file, works offline) ─────────────────────

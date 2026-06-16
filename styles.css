@@ -320,9 +320,9 @@ body.native-scan > *:not(#native-scan-overlay){ visibility:hidden !important; }
 /* success toast — top of screen, green, on a successful scan */
 .success-toast{
   position:fixed; left:50%; top:calc(env(safe-area-inset-top) + 14px); transform:translateX(-50%);
-  background:#1E9E5A; color:#fff; padding:12px 22px; border-radius:999px;
+  background:#1E9E5A; color:#fff; padding:12px 22px; border-radius:18px;
   font-weight:700; font-size:15px; z-index:300; box-shadow:var(--shadow);
-  max-width:92vw; text-align:center; white-space:nowrap;
+  max-width:88vw; text-align:center; line-height:1.3;
 }
 .success-toast[hidden]{display:none}
 .success-toast:not([hidden]){ animation:successIn .3s cubic-bezier(.2,.9,.2,1); }
