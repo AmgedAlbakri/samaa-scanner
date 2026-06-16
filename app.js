@@ -300,11 +300,14 @@
     if (scanning || starting) return;
     starting = true;
 
-    // Native-app path: html5-qrcode renders a BLACK preview and gets stuck in
-    // "transition" errors inside the Android WebView, but raw getUserMedia + the
-    // WebView's built-in BarcodeDetector are reliable (the on-device probe proved both
-    // work). Use our own video + detector loop there. Browsers/PWA — where html5-qrcode
-    // works and is needed for iOS (no BarcodeDetector) — keep the proven path below.
+    // BEST native path: the ML Kit barcode scanner (real camera + hardware autofocus +
+    // bundled on-device model, no Google Play Services). The WebView camera on some
+    // phones (Huawei) won't autofocus, so the in-page detector can't read; ML Kit does.
+    if (nativeScanSupported()) { startMlkitScan(); return; }
+
+    // Fallback native path (APK without the ML Kit plugin): raw getUserMedia + the
+    // WebView's built-in BarcodeDetector. Browsers/PWA (incl. iOS) keep the html5-qrcode
+    // path below.
     if (window.Capacitor && ('BarcodeDetector' in window)) { startNativeScanner(); return; }
 
     if (!window.Html5Qrcode) { toast('Scanner failed to load.', true); starting = false; return; }
@@ -502,6 +505,66 @@
     detectTimer = setTimeout(tick, 300);
   }
 
+  // ---- Native ML Kit barcode scanner (Capacitor APK only) ----
+  // startScan() renders the real camera BEHIND a transparent WebView and streams
+  // detected barcodes via the 'barcodesScanned' event. We make the page transparent and
+  // float a minimal overlay (aim frame + Stop) on top. On a hit we stop (to reveal the
+  // app) and route the code through the same onScan() handler as every other path.
+  var usingMlkit = false, mlkitListener = null;
+  function nativeScanSupported() {
+    return !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BarcodeScanning);
+  }
+  function startMlkitScan() {
+    var BS = window.Capacitor.Plugins.BarcodeScanning;
+    BS.requestPermissions().then(function () {
+      return BS.addListener('barcodesScanned', function (result) {
+        var arr = result && result.barcodes;
+        if (arr && arr.length) {
+          var code = arr[0].rawValue || arr[0].displayValue;
+          stopMlkitScan();          // reveal the app UI before showing the result
+          if (code) onScan(code);
+        }
+      });
+    }).then(function (listener) {
+      mlkitListener = listener;
+      usingMlkit = true; scanning = true; starting = false;
+      document.documentElement.classList.add('native-scan');
+      document.body.classList.add('native-scan');
+      showScanOverlay();
+      return BS.startScan();        // all formats, bundled on-device model
+    }).catch(function (e) {
+      starting = false;
+      stopMlkitScan();
+      toast('Camera error: ' + (e && (e.message || e.code || e)), true);
+      console.warn('mlkit startScan failed', e);
+    });
+  }
+  function stopMlkitScan() {
+    var BS = (window.Capacitor && window.Capacitor.Plugins) ? window.Capacitor.Plugins.BarcodeScanning : null;
+    try { if (mlkitListener && mlkitListener.remove) mlkitListener.remove(); } catch (e) {}
+    mlkitListener = null;
+    try { if (BS) BS.stopScan(); } catch (e) {}
+    document.documentElement.classList.remove('native-scan');
+    document.body.classList.remove('native-scan');
+    hideScanOverlay();
+    usingMlkit = false; scanning = false;
+    var t = $('scan-toggle'); if (t) t.textContent = 'Start camera';
+  }
+  function showScanOverlay() {
+    var o = $('native-scan-overlay');
+    if (o) { o.style.display = 'flex'; return; }
+    o = document.createElement('div');
+    o.id = 'native-scan-overlay';
+    o.className = 'native-scan-overlay';
+    o.innerHTML =
+      '<div class="ns-hint">Point the camera at a barcode</div>' +
+      '<div class="ns-frame"></div>' +
+      '<button id="ns-stop" class="ns-stop">Stop</button>';
+    document.body.appendChild(o);
+    $('ns-stop').addEventListener('click', function () { stopMlkitScan(); });
+  }
+  function hideScanOverlay() { var o = $('native-scan-overlay'); if (o) o.style.display = 'none'; }
+
   // Turn a getUserMedia error into a message that says what's ACTUALLY wrong, instead
   // of always blaming permissions (which sent staff in circles re-allowing a camera
   // they'd already allowed). NotAllowed = truly blocked; NotReadable = busy; etc.
@@ -675,6 +738,7 @@
   }
 
   function stopScanner() {
+    if (usingMlkit) { stopMlkitScan(); return; }
     if (usingNative) {
       // Native path: stop the detector loop, release the camera, drop the video element.
       clearTimeout(detectTimer); detectTimer = null;
