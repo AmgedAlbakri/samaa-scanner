@@ -324,7 +324,7 @@ body.native-scan > *:not(#native-scan-overlay){ visibility:hidden !important; }
   background:var(--bg); animation:splashOut .5s ease 1.5s forwards;
 }
 .app-splash .splash-logo{
-  width:160px; animation:splashLogo 1.15s cubic-bezier(.2,.75,.2,1) both;
+  width:33vw; max-width:210px; animation:splashLogo 1.15s cubic-bezier(.2,.75,.2,1) both;
 }
 @keyframes splashLogo{
   0%{ opacity:0; transform:scale(.72) translateY(10px); }
