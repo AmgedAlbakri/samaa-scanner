@@ -5,7 +5,7 @@
  * on the phones because the cached app.js never got replaced.)
  * API calls (cross-origin POST to Apps Script) are always network-only — never cached.
  */
-var CACHE = 'samaa-scanner-v29';
+var CACHE = 'samaa-scanner-v30';
 var SHELL = [
   './',
   './index.html',
@@ -52,6 +52,8 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) {
     return;
   }
+  // Never route big APK downloads through the SW — no point caching a ~27 MB binary.
+  if (new URL(req.url).pathname.endsWith('.apk')) return;
   // NETWORK-FIRST: try the network, update the cache with the fresh response, and only
   // fall back to the cache when offline. This guarantees the phones run the latest code.
   e.respondWith(
