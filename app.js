@@ -262,10 +262,10 @@
                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
   function supportedFormats() {
-    // EAN-13 first, then CODE128, EAN-8, UPC-A, QR (§2)
+    // Retail product barcodes only — QR is intentionally NOT included.
     var F = window.Html5QrcodeSupportedFormats;
     if (!F) return undefined;
-    return [F.EAN_13, F.CODE_128, F.EAN_8, F.UPC_A, F.QR_CODE];
+    return [F.EAN_13, F.CODE_128, F.EAN_8, F.UPC_A];
   }
 
   var starting = false;
@@ -507,7 +507,7 @@
 
   function startDetectLoop(video) {
     var detector;
-    try { detector = new window.BarcodeDetector({ formats: ['ean_13', 'code_128', 'ean_8', 'upc_a', 'qr_code'] }); }
+    try { detector = new window.BarcodeDetector({ formats: ['ean_13', 'code_128', 'ean_8', 'upc_a'] }); }
     catch (e) { detector = new window.BarcodeDetector(); }
     clearTimeout(detectTimer);
     function tick() {
@@ -548,7 +548,8 @@
       document.documentElement.classList.add('native-scan');
       document.body.classList.add('native-scan');
       showScanOverlay();
-      return BS.startScan();        // all formats, bundled on-device model
+      // Retail product barcodes only — QR (and other 2D codes) intentionally excluded.
+      return BS.startScan({ formats: ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128', 'CODE_39', 'ITF'] });
     }).catch(function (e) {
       starting = false;
       stopMlkitScan();
@@ -708,7 +709,7 @@
       if (!bitmap) throw new Error('no frame');
       var D = window.BarcodeDetector;
       if (D) {
-        var det = new D({ formats: ['ean_13', 'code_128', 'ean_8', 'upc_a', 'qr_code'] });
+        var det = new D({ formats: ['ean_13', 'code_128', 'ean_8', 'upc_a'] });
         return det.detect(bitmap).then(function (codes) {
           if (codes && codes.length) { onScan(codes[0].rawValue); return true; }
           return false;
