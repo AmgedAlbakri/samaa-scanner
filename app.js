@@ -837,7 +837,20 @@
     renderSession();
     pushLog(entry);
     beep();
-    flashToast('✓ ' + p.name);
+    successToast();                  // green "Scanned successfully ✅" at the top
+    flashToast('✓ ' + p.name);       // product name in the viewfinder
+  }
+
+  // Brief success toast at the top of the screen, shown on every accepted scan.
+  var successTimer = null;
+  function successToast(msg) {
+    var el = $('scan-success');
+    if (!el) return;
+    el.textContent = msg || t('scan_success');
+    el.hidden = false;
+    el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';  // replay entrance
+    clearTimeout(successTimer);
+    successTimer = setTimeout(function () { el.hidden = true; }, 1800);
   }
 
   // ── success beep (Web Audio — no file, works offline) ─────────────────────

@@ -43,6 +43,7 @@
       capture_fail: 'Could not capture — tap again',
       looking_up: 'Looking up {code}…',
       not_found_code: '✗ Not found: {code}',
+      scan_success: 'Scanned successfully ✅',
       // products
       search_ph: 'Search products, SKU…',
       products_loading: 'Loading products…',
@@ -130,6 +131,7 @@
       capture_fail: 'تعذّر الالتقاط — حاول مجدداً',
       looking_up: 'جارٍ البحث عن {code}…',
       not_found_code: '✗ غير موجود: {code}',
+      scan_success: 'تم المسح بنجاح ✅',
       search_ph: 'ابحث عن منتج أو SKU…',
       products_loading: 'جارٍ تحميل المنتجات…',
       products_empty: 'لا توجد منتجات.',
